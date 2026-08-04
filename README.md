@@ -11,10 +11,9 @@ A dark-theme trading journal for Indian markets, where brokerage, STT, stamp dut
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5.7_strict-3178C6?logo=typescript&logoColor=white">
   <img alt="Vite" src="https://img.shields.io/badge/Vite-6-646CFF?logo=vite&logoColor=white">
   <img alt="Tailwind" src="https://img.shields.io/badge/Tailwind-v4-06B6D4?logo=tailwindcss&logoColor=white">
-  <img alt="Recharts" src="https://img.shields.io/badge/Recharts-2.15-FF6384">
   <img alt="Supabase" src="https://img.shields.io/badge/Supabase-Postgres_·_Auth-3ECF8E?logo=supabase&logoColor=white">
   <img alt="Cloudflare" src="https://img.shields.io/badge/Cloudflare-Workers_·_Pages_·_R2-F38020?logo=cloudflare&logoColor=white">
-  <img alt="License" src="https://img.shields.io/badge/license-all_rights_reserved-lightgrey">
+  <img alt="Cost" src="https://img.shields.io/badge/runs_on-%240%2Fmonth-22c55e">
 </p>
 
 </div>
@@ -75,7 +74,7 @@ Sixteen pages. Here's the tour.
 | **Goals** | Monthly %-of-portfolio targets, capital planner, pace tracking, discipline scoring, milestones |
 | **Watchlist** | Planned setups with alert prices |
 | **Reports** | Downloadable performance / trade-log / tax summaries, over a period independent of the global filters |
-| **Settings** | Profile, appearance, editable charge + tax rate cards, export / import / reset |
+| **Settings** | Profile, appearance, editable charge + tax rate cards, export / import / migrate |
 
 ## Screenshots
 
@@ -110,7 +109,7 @@ Even the exchange matters: NSE cash equity is `0.00297%`, BSE is `0.00375%`. One
 ### Where the tax base diverges
 
 ```
-netPnl     = grossPnl − charges.total          ← every cost, no exceptions
+netPnl     = grossPnl − charges.total           ← every cost, no exceptions
 taxablePnl = grossPnl − deductible charges only ← depends on tax category
 ```
 
@@ -132,21 +131,114 @@ Tax parameters for FY 2025-26 are editable too: ₹4,00,000 basic exemption, ₹
 
 ---
 
-## 🛠 Built with
+## 🏗 How it's built
 
-| | |
-|---|---|
-| **Build** | Vite 6 · TypeScript 5.7 `strict` · Node 20 |
-| **UI** | React 18.3 · Tailwind CSS v4 (`@theme` tokens, zero config file) |
-| **Charts** | Recharts 2.15 |
-| **State** | Zustand 5 — optimistic, API-backed |
-| **Backend** | Cloudflare Worker + Hono · Supabase Postgres (RLS) · Supabase Auth · Cloudflare R2 |
-| **Routing** | React Router 6.28, lazy routes |
-| **Dates** | date-fns 4 |
-| **Icons** | lucide-react |
-| **Type** | Inter Variable · JetBrains Mono |
+```mermaid
+flowchart TD
+    P["React SPA<br/>16 pages · 40+ charts"]
+    S["zustand stores<br/>optimistic, in-memory"]
+    W["Cloudflare Worker · Hono<br/>authenticate + forward"]
+    DB[("Supabase Postgres<br/>Row Level Security")]
+    R2[("Cloudflare R2<br/>screenshots")]
+    A["Supabase Auth"]
 
-**No component library.** Every Card, Button, Badge, Modal and Table is hand-built in `src/components/ui/`. Same for the chart theme.
+    P -- "useStore(s => s.trades)" --> S
+    S -- "fetch + Bearer JWT" --> W
+    W -- "forwards YOUR token" --> DB
+    W --> R2
+    A -. "access token" .-> P
+
+    style S fill:#1c1f24,stroke:#7c5cff,color:#e6e8eb
+    style W fill:#1c1f24,stroke:#f38020,color:#e6e8eb
+    style DB fill:#14321f,stroke:#3ecf8e,color:#e6e8eb
+    style R2 fill:#1c1f24,stroke:#f38020,color:#e6e8eb
+    style A fill:#1c1f24,stroke:#8b929d,color:#e6e8eb
+    style P fill:#141619,stroke:#262a31,color:#e6e8eb
+```
+
+| Layer | Runs on | Job |
+|---|---|---|
+| **Frontend** | Cloudflare Pages | The whole app. All the maths happens here |
+| **API** | Cloudflare Worker + Hono | Check the token, forward the request. ~100 lines |
+| **Database** | Supabase Postgres | 8 tables, 32 RLS policies. Decides who sees what |
+| **Auth** | Supabase Auth | Identity, sessions, token refresh |
+| **Screenshots** | Cloudflare R2 | WebP blobs, namespaced per user |
+
+---
+
+## 🚶 Follow one trade through the system
+
+The clearest way to understand the architecture is to watch a single trade travel through it.
+
+**1. You hit Save on the trade form.**
+The browser computes brokerage, STT, exchange fees, SEBI, stamp duty, GST, DP, the tax category and the R-multiple — all in [`tradeMath.ts`](src/lib/tradeMath.ts). **Nothing is asked of the server.**
+
+**2. The store updates immediately.**
+`addTrade(trade)` pushes it into the zustand array. Your table re-renders instantly. As far as the UI is concerned, done.
+
+**3. The API call fires in the background.**
+The store never awaits it. If the network is slow, you don't wait; if it fails, a toast tells you.
+
+**4. The Worker checks who you are.**
+It validates your Supabase token and — crucially — **forwards that same token** to Postgres rather than using a master key. It never learns which rows are yours.
+
+**5. Postgres decides.**
+An RLS policy rewrites your query to `WHERE user_id = auth.uid()` at the database level. The Worker couldn't fetch someone else's trades even if a bug asked it to.
+
+**6. Reading it back is even simpler.**
+On the next load, the Worker pipes the response bytes straight to your browser without parsing them. It moves data it doesn't understand — which is exactly why it's fast.
+
+**Net effect:** the server is a doorman, not a brain. Every calculation that makes LedgerX useful runs on your machine.
+
+---
+
+## 💡 Decisions worth knowing about
+
+Five choices that shaped everything else.
+
+### The Worker never reads what it sends
+
+```js
+// ❌ CPU scales with your dataset
+const { data } = await supabase.from("trades").select("*");
+return Response.json(data);
+
+// ✅ CPU stays flat forever
+const res = await fetch(postgrestUrl, { headers });
+return new Response(res.body);
+```
+
+Cloudflare's free tier allows **10 ms of CPU per request**. Benchmarked on real data, `JSON.parse` + `stringify` costs **~2.7 µs per trade** — so parsing would blow the budget somewhere past 3,700 trades.
+
+Piping the raw stream costs the same whether you have 25 trades or 250,000. The limit stopped being a scaling concern and became a non-issue.
+
+### The database is the security boundary, not the code
+
+Every table has four RLS policies scoped `to authenticated`. The Worker holds **no `service_role` key** — not in the code, not in an env var, nowhere.
+
+The read handler deliberately omits a `user_id` filter, with this comment:
+
+> *"RLS scopes; no user_id filter (that would mask an RLS misconfiguration)"*
+
+If the Worker had a bug tomorrow, Postgres would still refuse to send another user's rows. Security that doesn't depend on remembering.
+
+### Dates are `text`, not `timestamptz`
+
+Looks wrong. Isn't.
+
+The app stores `"2025-01-01T16:17"` — the raw value from a `datetime-local` input. No seconds, no timezone. A `timestamptz` column would hand back `"2025-01-01T16:17:00+00:00"` and quietly break every date picker in the app.
+
+All date maths already runs client-side in `date-fns`. Storing text guarantees a byte-identical round trip. Boring beats clever.
+
+### Money is `double precision`, not `numeric`
+
+JavaScript numbers *are* float64. `double precision` round-trips exactly.
+
+`numeric` sounds safer, but it risks arriving as a string — and every function in [`metrics.ts`](src/lib/metrics.ts) expects a `number`. One type mismatch would silently corrupt every P&L calculation in the app.
+
+### No ORM
+
+Workers run V8 isolates, not Node. Prisma would need driver adapters or a paid proxy. Plain `fetch` against PostgREST needs neither — and it's what makes pass-through streaming possible at all, since there's no client insisting on deserializing your rows.
 
 ---
 
@@ -156,20 +248,17 @@ Tax parameters for FY 2025-26 are editable too: ₹4,00,000 basic exemption, ₹
 git clone https://github.com/Saurabh-0312/LedgerX.git
 cd LedgerX
 npm install
-npm run dev
+cp .env.example .env      # fill in the three VITE_* values
 ```
 
-→ **http://localhost:5173**
-
-The app is cloud-backed now, so local dev needs two things running and a `.env`:
+Two terminals:
 
 ```bash
-cp .env.example .env    # fill in VITE_SUPABASE_URL / ANON_KEY / VITE_API_URL
-cd worker && npx wrangler dev    # the API on :8787 (simulated R2, no remote needed)
-npm run dev                       # the app on :5173, in another terminal
+cd worker && npx wrangler dev    # API on :8787 (R2 simulated, no remote needed)
+npm run dev                      # app on :5173
 ```
 
-Sign in (Supabase Auth) and your data loads from Postgres. New accounts start empty; add a trade and it persists in the cloud. Want a blank slate again? **Settings → Data management → Clear all data.**
+→ **http://localhost:5173** — sign in, and your data loads from Postgres. New accounts start empty.
 
 | Command | |
 |---|---|
@@ -178,7 +267,7 @@ Sign in (Supabase Auth) and your data loads from Postgres. New accounts start em
 | `npm run typecheck` | Types only |
 | `npm run preview` | Serve the build on :4173 |
 
-`npm run build` runs `tsc --noEmit` first and **fails on any type error.** That's deliberate.
+`npm run build` runs `tsc --noEmit` first and **fails on any type error.** Deliberate.
 
 ---
 
@@ -191,24 +280,23 @@ src/
 ├── index.css                # Tailwind v4 @theme tokens
 │
 ├── store/
-│   ├── useStore.ts          # Trades, accounts, journal, goals,
-│   │                        #   watchlist, settings — API-backed, optimistic
+│   ├── useStore.ts          # Trades, accounts, journal, goals, watchlist,
+│   │                        #   settings — API-backed, optimistic, synchronous
 │   ├── useMtfStore.ts       # MTF tracker — deliberately isolated
 │   ├── settingsSync.ts      # Single debounced writer for the shared settings row
 │   ├── useFilteredTrades.ts # Global date-range + account scoping
 │   └── toast.ts
 │
 ├── lib/
-│   ├── api.ts               # fetch wrapper — attaches the JWT, retries once on 401
-│   ├── supabase.ts          # Supabase client (auth + session)
-│   ├── images.ts            # WebP conversion + authenticated R2 screenshot access
+│   ├── api.ts               # fetch wrapper — JWT, retry-once-on-401, bulk key padding
+│   ├── supabase.ts          # Auth client
+│   ├── images.ts            # WebP conversion + authenticated R2 access
 │   ├── backup.ts            # Lossless export / import
 │   ├── migrateLocal.ts      # One-time localStorage → cloud migration
 │   ├── metrics.ts           # All performance math. Pure. Takes Trade[].
 │   ├── tradeMath.ts         # Charges, tax category, R-multiple
 │   ├── incomeTax.ts         # FY engine — slabs, 87A, cess
-│   ├── sampleData.ts        # Seeded deterministic generator
-│   ├── format.ts · csv.ts · rng.ts
+│   ├── format.ts · csv.ts · rng.ts · sampleData.ts
 │   └── mtf/                 # MTF domain: types, calc, palette, export
 │
 ├── components/
@@ -219,47 +307,24 @@ src/
 │
 └── pages/                   # One folder per page for its subcomponents
 
-worker/                      # Cloudflare Worker (Hono)
-├── src/index.ts             #   CORS, auth middleware, route registration, keep-alive cron
-├── src/crud.ts              #   shared entity CRUD (pass-through streaming)
-├── src/settings.ts          #   user_settings singleton
-└── src/screenshots.ts       #   R2 upload / download
+worker/src/
+├── index.ts                 # CORS, auth middleware, routing, keep-alive cron
+├── crud.ts                  # Shared entity CRUD (pass-through streaming)
+├── settings.ts              # user_settings singleton
+└── screenshots.ts           # R2 upload / download
 
-supabase/migrations/         # Postgres schema — 8 tables, RLS, grants (applied)
+supabase/migrations/         # 8 tables, RLS, grants — applied
 ```
 
 `@/` → `src/`. Import `@/lib/metrics`, never `../../lib/metrics`.
 
 ---
 
-## 🧱 How it holds together
-
-### The architecture
-
-```mermaid
-flowchart TD
-    P["16 pages · 40+ charts"] -- "useStore(s => s.trades)" --> S["zustand stores<br/>optimistic · in-memory"]
-    P -- "addTrade / closeTrade / …" --> S
-    S -- "fetch + Bearer JWT" --> W["Cloudflare Worker · Hono<br/>pass-through proxy"]
-    W -- "forwards the caller's JWT" --> DB[("Supabase Postgres<br/>Row Level Security")]
-    W --> R2[("Cloudflare R2<br/>screenshots")]
-    A["Supabase Auth"] -. "access token" .-> P
-
-    style S fill:#1c1f24,stroke:#7c5cff,color:#e6e8eb
-    style W fill:#1c1f24,stroke:#f38020,color:#e6e8eb
-    style DB fill:#14321f,stroke:#3ecf8e,color:#e6e8eb
-    style R2 fill:#1c1f24,stroke:#f38020,color:#e6e8eb
-    style A fill:#1c1f24,stroke:#8b929d,color:#e6e8eb
-    style P fill:#141619,stroke:#262a31,color:#e6e8eb
-```
-
-**Not one page or chart touches the network.** Everything still reads through a selector and writes through a named action — the pages never changed. The two store files hydrate from the API on load and mirror every mutation optimistically, so swapping `localStorage` for the cloud really was the two-file job the boundary promised.
-
-The Worker is a thin authenticated proxy: it validates the Supabase token, then **forwards it** to Postgres so **Row Level Security** — not the Worker — decides which rows you see. It holds no `service_role` key. Screenshots stream to Cloudflare R2, namespaced by user id.
+## 🧱 Patterns that keep it coherent
 
 ### Compute is pure
 
-Every function in `src/lib/metrics.ts` takes `Trade[]` and returns data. No hooks, no store access, no side effects — `computeKpis`, `equityCurve`, `drawdownSeries`, `dailyPnl`, `monthlyPnl`, `pnlBy`, `rHistogram`, `dayOfWeekPerf`, `hourOfDayPerf`, `calendarMonth`.
+Every function in [`metrics.ts`](src/lib/metrics.ts) takes `Trade[]` and returns data. No hooks, no store access, no side effects — `computeKpis`, `equityCurve`, `drawdownSeries`, `dailyPnl`, `monthlyPnl`, `pnlBy`, `rHistogram`, `dayOfWeekPerf`, `hourOfDayPerf`, `calendarMonth`.
 
 Only `status === "Closed"` trades carry P&L, tax and R. The helpers filter internally so you don't have to remember.
 
@@ -267,13 +332,19 @@ Only `status === "Closed"` trades carry P&L, tax and R. The helpers filter inter
 
 The topbar date-range and account pickers reach every page through `useFilteredTrades()`. Pages never touch `trades` raw. Two deliberate exceptions: **Tax Report** has its own FY selector, **Reports** has its own period.
 
-`datasetToday()` anchors "today" to the newest trade instead of the wall clock — so the sample data behaves whenever you open it.
+`datasetToday()` anchors "today" to the newest trade rather than the wall clock.
 
 ### Optimistic, then synced
 
-Each store hydrates from the API on sign-in and writes optimistically — the UI updates instantly, the API call fires in the background, and a failed write raises a toast. `settings` is one shared Postgres row written through a single debounced path, so the two stores can never clobber each other's columns.
+Store actions are **synchronous** — that's not an accident. Making them `async` would have forced edits across 30 call sites in 11 files and turned a storage swap into an app rewrite. Instead each action updates state instantly and fires its API call in the background.
 
-The pre-cloud `localStorage` keys (`ledgerx-store` v7, `mtf-store` v2) are **still on disk, read-only** — the source for a one-time **Settings → Migrate to cloud** that uploads them to your account, verified field-by-field, and never touches them again.
+`settings` is one shared Postgres row written through a single debounced path, so the two stores can never overwrite each other's columns.
+
+### MTF interest is derived, never stored
+
+A margin position stores only *"bought 8 Jul, 25 shares at ₹1153.50"*. Open it in October and the browser subtracts the dates and computes the interest fresh.
+
+No cron job. No stale values. No server maths. Closed positions freeze a snapshot; open ones recalculate on every render.
 
 ### The design system
 
@@ -288,59 +359,82 @@ Semantic tokens only, defined in `src/index.css`. No raw hex in class names, eve
 
 Chart colours are a separate, accessibility-validated system: 8 fixed categorical slots assigned **in order, never cycled**, plus a dedicated P&L pair. Reach for `chartTheme`, never a hand-picked hex.
 
-`CONTRACT.md` at the repo root pins the full shared API. It's what the pages were built against — keep it honest.
+[`CONTRACT.md`](CONTRACT.md) pins the full shared API — it's what the pages were built against.
 
 ---
 
 ## 🔒 Your data
 
-Your journal lives in **your own Supabase account**, isolated by Postgres **Row Level Security** — every query is scoped to your user id, enforced by the database, not the app. Sign in with Supabase Auth and you see only your rows; the Worker forwards your token and holds no master key, so it can't reach anyone else's data either.
+Your journal lives in **your own account**, isolated by Postgres Row Level Security. Sign in and you see only your rows — enforced by the database, not by application code.
 
 | Where | Holds |
 |---|---|
-| **Postgres** (8 tables, RLS) | Trades, accounts, cash, journal, goals, targets, watchlist, settings, MTF positions & brokers |
-| **Cloudflare R2** | Trade screenshots — WebP, namespaced by user id |
-| **`localStorage`** | The pre-cloud copy — kept read-only as your offline backup |
+| **Postgres** (8 tables, RLS) | Trades, accounts, cash, journal, goals, targets, watchlist, settings, MTF |
+| **Cloudflare R2** | Screenshots — WebP, namespaced by user id |
+| **`localStorage`** | The pre-cloud copy, kept **read-only** as an offline backup |
 
-**No analytics, no telemetry, no third-party tracking.** Just your data, in your account.
+**No analytics, no telemetry, no third-party tracking.**
 
 ### Back it up
 
-**Settings → Data management → Export JSON** — a complete, lossless snapshot: every collection, your settings, and the full MTF store. **Import** restores all of it. (The old export gaps are closed — nothing is left behind anymore.)
+**Settings → Data management → Export JSON** — a complete, lossless snapshot: every collection, your settings, and the full MTF store. **Import** restores all of it.
+
+> ⚠️ The free Supabase tier has **no automatic backups.** That export is your safety net — run it occasionally.
+
+---
+
+## 💰 What it costs
+
+**$0/month.** Every component sits on a permanent free tier — no trial clock.
+
+| Resource | Free | Runs out at |
+|---|---|---|
+| Pages bandwidth | unlimited | never |
+| Worker requests | 100,000/day | ~3,000 users |
+| Worker CPU | 10 ms/request | never (pass-through) |
+| Postgres | 500 MB | ~640,000 trades |
+| **Supabase egress** | **5 GB/month** | **~150 users** ← first to bind |
+| R2 storage | 10 GB | ~260,000 screenshots |
+| Auth | 50,000 MAU | never, realistically |
+
+At **~778 bytes per trade** (measured, not estimated), a solo user would need centuries to trouble any of these. The first real ceiling is Supabase egress — and by then $25/mo buys 50× the headroom.
+
+Two free-tier quirks worth knowing: **no backups** (hence the export button) and a **7-day idle pause** — handled by a daily cron on the Worker that makes one trivial read so the project never sleeps.
 
 ---
 
 ## ☁️ Deploy
 
-Frontend on **Cloudflare Pages**, API on a **Cloudflare Worker**, data in **Supabase**, screenshots in **R2**.
-
 ```bash
 cd worker
 npx wrangler r2 bucket create ledgerx-screenshots   # once
-npx wrangler deploy                                  # Worker + R2 binding + daily cron
+npx wrangler deploy                                  # Worker + R2 binding + cron
 ```
 
-Then point the frontend at it: connect the repo to **Cloudflare Pages**, build `npm run build`, output `dist`, `NODE_VERSION=20`, and set the three `VITE_*` env vars — with `VITE_API_URL` pointing at the deployed Worker's `workers.dev` URL. Vite inlines env vars at build time, so **redeploy Pages after adding them.**
+Then connect the repo to **Cloudflare Pages**: build `npm run build`, output `dist`, `NODE_VERSION=20`, and set the three `VITE_*` env vars — with `VITE_API_URL` pointing at the deployed Worker.
 
-A daily `[triggers]` cron on the Worker makes one unauthenticated read against Postgres so the free Supabase project never idles into its 7-day pause — see [`worker/README.md`](worker/README.md). The pre-cloud [`netlify.toml`](netlify.toml) / [`vercel.json`](vercel.json) static configs are kept for reference.
+⚠️ Vite inlines `VITE_*` at **build** time, so **redeploy Pages after adding them** or they won't exist in the bundle.
 
-The SPA fallback (`public/_redirects`) **isn't optional** — without it every route except `/` 404s on hard refresh. Classic.
+The SPA fallback in [`public/_redirects`](public/_redirects) isn't optional — without it every route except `/` 404s on hard refresh. Classic.
 
 ---
 
 ## ✅ Shipped
 
-Everything the roadmap promised — the journal now follows you between devices:
+Migrated from browser localStorage to a full cloud stack across 11 phases — each one independently testable, committable and revertible.
 
-- [x] **Supabase** — Postgres + Auth + Row Level Security, Mumbai region
-- [x] **Real auth** — email/password sign-in, a session-guarded app shell (`/login` and `/signup` do the real thing now)
-- [x] **Cloudflare Worker API** — Hono, a JWT-forwarding pass-through to PostgREST so RLS stays the boundary
-- [x] **One-click migration** — detect local data, verify the store version, upload it field-verified
-- [x] **Screenshots → R2**, WebP on upload, never inline data-URIs in a trade row
-- [x] **Lossless backup** — Export / Import now covers every collection
-- [x] **Cloudflare Pages** deploy + a daily keep-alive cron
+- [x] **Lossless backup** — export/import covering every collection
+- [x] **Postgres schema** — 8 tables, 32 RLS policies, explicit grants
+- [x] **Cloudflare Worker API** — Hono, JWT-forwarding, pass-through streaming
+- [x] **Real auth** — Supabase email/password, session-guarded shell
+- [x] **Store swap** — both zustand stores moved to the API, zero call sites changed
+- [x] **Verified migration** — local data uploaded, checked field-by-field
+- [x] **Screenshots → R2** — WebP on upload, never data-URIs in a row
+- [x] **Pages deploy** + daily keep-alive cron + 401 token refresh
 
-Still on the wishlist: Google sign-in, password reset, and broker API sync (Zerodha / Groww). Thanks to the store boundary, none of it touched the pages.
+**~6% of the codebase changed.** Every page, chart and calculation is exactly what it was — the storage boundary held.
+
+Still on the wishlist: automated cloud backups, Google sign-in, password reset, and broker API sync (Zerodha / Groww).
 
 ---
 
@@ -348,10 +442,10 @@ Still on the wishlist: Google sign-in, password reset, and broker API sync (Zero
 
 Personal project, but issues and ideas are welcome. If you send a PR:
 
-1. `npm run typecheck` passes. The build enforces it anyway.
-2. Design tokens and `chartTheme` only — no raw hex.
-3. Read `CONTRACT.md` before touching `store/`, `lib/`, or `components/ui/`.
-4. New persisted field? Bump the version, write the migration.
+1. `npm run typecheck` passes — the build enforces it anyway
+2. Design tokens and `chartTheme` only, no raw hex
+3. Read `CONTRACT.md` before touching `store/`, `lib/`, or `components/ui/`
+4. New persisted field? Add the column, the RLS grant, and the mapper
 
 ---
 
