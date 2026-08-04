@@ -45,6 +45,8 @@ import {
 import { api } from "@/lib/api";
 import { supabase } from "@/lib/supabase";
 import { toast } from "@/store/toast";
+import { scheduleSettingsSync, putCompleteSettings } from "@/store/settingsSync";
+import { useMtfStore } from "@/store/useMtfStore";
 
 const DEFAULT_SETTINGS: AppSettings = {
   userName: "Aarav Sharma",
@@ -171,17 +173,6 @@ function mergeSettings(raw: Partial<AppSettings> | undefined): AppSettings {
   };
 }
 
-/** Debounced PUT of the whole user_settings row (D6). Singleton writes can burst
- *  (setMonthCapital ×20); collapse them into one PUT of the latest state. */
-let settingsTimer: ReturnType<typeof setTimeout> | undefined;
-const scheduleSettingsPut = (get: () => StoreState): void => {
-  if (settingsTimer) clearTimeout(settingsTimer);
-  settingsTimer = setTimeout(() => {
-    const { goals, portfolioTargets, settings } = get();
-    bg("settings", api.put("/api/settings", { goals, portfolioTargets, settings }));
-  }, 500);
-};
-
 interface UserSettingsRow {
   goals?: Goals;
   portfolioTargets?: PortfolioTargets;
@@ -222,6 +213,7 @@ export const useStore = create<StoreState>()(
           let goals: Goals;
           let portfolioTargets: PortfolioTargets;
           let settings: AppSettings;
+          let mtfAccountValue: number;
 
           if (settingsRows.length > 0) {
             const row = settingsRows[0];
@@ -231,6 +223,7 @@ export const useStore = create<StoreState>()(
               percents: row.portfolioTargets?.percents ?? DEFAULT_PORTFOLIO_TARGETS.percents,
               capitalByMonth: row.portfolioTargets?.capitalByMonth ?? {},
             };
+            mtfAccountValue = row.mtfAccountValue ?? 0;
           } else {
             // D8 — first run: seed the row with identity from the auth user.
             const { data } = await supabase.auth.getSession();
@@ -239,7 +232,9 @@ export const useStore = create<StoreState>()(
             settings = mergeSettings({ userName, email });
             goals = SAMPLE_GOALS;
             portfolioTargets = DEFAULT_PORTFOLIO_TARGETS;
-            await api.put("/api/settings", { goals, portfolioTargets, settings });
+            mtfAccountValue = 0;
+            // Create the complete four-column row via the single shared writer (D3).
+            await putCompleteSettings({ goals, portfolioTargets, settings, mtfAccountValue });
           }
 
           set({
@@ -254,6 +249,9 @@ export const useStore = create<StoreState>()(
             hydrated: true,
             hydrateError: null,
           });
+          // accountValue lives in the same settings row — hand it to the MTF store
+          // rather than issuing a second GET /api/settings (D4).
+          useMtfStore.setState({ accountValue: mtfAccountValue });
         } catch (e) {
           set({ hydrateError: e instanceof Error ? e.message : "Failed to load your data", hydrated: false });
         }
@@ -387,11 +385,11 @@ export const useStore = create<StoreState>()(
 
       setGoals: (goals) => {
         set({ goals });
-        scheduleSettingsPut(get);
+        scheduleSettingsSync();
       },
       setTargetPercents: (percents) => {
         set((s) => ({ portfolioTargets: { ...s.portfolioTargets, percents } }));
-        scheduleSettingsPut(get);
+        scheduleSettingsSync();
       },
       setMonthCapital: (yearMonth, value) => {
         set((s) => {
@@ -400,11 +398,11 @@ export const useStore = create<StoreState>()(
           else delete capitalByMonth[yearMonth];
           return { portfolioTargets: { ...s.portfolioTargets, capitalByMonth } };
         });
-        scheduleSettingsPut(get);
+        scheduleSettingsSync();
       },
       updateSettings: (patch) => {
         set((s) => ({ settings: { ...s.settings, ...patch } }));
-        scheduleSettingsPut(get);
+        scheduleSettingsSync();
       },
       setFilters: (patch) => set((s) => ({ filters: { ...s.filters, ...patch } })),
 
@@ -412,6 +410,7 @@ export const useStore = create<StoreState>()(
         const prev = get();
         const sample = freshSample();
         set({ ...sample, filters: DEFAULT_FILTERS });
+        scheduleSettingsSync(); // push reset goals/portfolioTargets (+ MTF value) via the single writer
         bg(
           "reset",
           (async () => {
@@ -429,11 +428,6 @@ export const useStore = create<StoreState>()(
               bulkInsert(P.journal, sample.journal),
               bulkInsert(P.watchlist, sample.watchlist),
             ]);
-            await api.put("/api/settings", {
-              goals: sample.goals,
-              portfolioTargets: sample.portfolioTargets,
-              settings: get().settings,
-            });
           })(),
         );
       },
@@ -448,6 +442,7 @@ export const useStore = create<StoreState>()(
           portfolioTargets: DEFAULT_PORTFOLIO_TARGETS,
           filters: DEFAULT_FILTERS,
         });
+        scheduleSettingsSync(); // push reset portfolioTargets (+ MTF value) via the single writer
         bg(
           "clear",
           (async () => {
@@ -459,11 +454,6 @@ export const useStore = create<StoreState>()(
               bulkDelete(P.accounts, prev.accounts),
             ]);
             await bulkInsert(P.accounts, SAMPLE_ACCOUNTS);
-            await api.put("/api/settings", {
-              goals: get().goals,
-              portfolioTargets: DEFAULT_PORTFOLIO_TARGETS,
-              settings: get().settings,
-            });
           })(),
         );
       },

@@ -8,6 +8,7 @@ import { Toaster } from "@/components/ui/Toaster";
 import { PageSkeleton } from "@/components/ui/Skeleton";
 import { Button } from "@/components/ui/Button";
 import { useStore } from "@/store/useStore";
+import { useMtfStore } from "@/store/useMtfStore";
 
 /** App shell: collapsible sidebar + topbar + routed page content. */
 export function AppLayout() {
@@ -17,6 +18,9 @@ export function AppLayout() {
   const hydrated = useStore((s) => s.hydrated);
   const hydrateError = useStore((s) => s.hydrateError);
   const hydrate = useStore((s) => s.hydrate);
+  const mtfHydrated = useMtfStore((s) => s.hydrated);
+  const mtfHydrateError = useMtfStore((s) => s.hydrateError);
+  const mtfHydrate = useMtfStore((s) => s.hydrate);
 
   useEffect(() => {
     localStorage.setItem("ledgerx-sidebar", collapsed ? "1" : "0");
@@ -34,20 +38,28 @@ export function AppLayout() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // Load the user's cloud data once — we're already behind RequireAuth (D7).
+  // Load both stores' cloud data once — we're already behind RequireAuth. One
+  // gate, one error state covering both (D4, D7).
   useEffect(() => {
     void hydrate();
-  }, [hydrate]);
+    void mtfHydrate();
+  }, [hydrate, mtfHydrate]);
+
+  const loadError = hydrateError ?? mtfHydrateError;
+  const retry = () => {
+    void hydrate();
+    void mtfHydrate();
+  };
 
   // Never render the app with empty arrays after a failed load — show Retry (D7).
-  if (hydrateError) {
+  if (loadError) {
     return (
       <div className="flex min-h-screen items-center justify-center p-6">
         <div className="w-full max-w-md rounded-2xl border border-edge bg-raised p-6 text-center">
           <AlertTriangle className="mx-auto mb-3 text-warning" size={28} aria-hidden />
           <h1 className="text-[16px] font-semibold text-ink">Couldn’t load your data</h1>
-          <p className="mt-1.5 break-words text-[13px] text-muted">{hydrateError}</p>
-          <Button variant="primary" className="mt-5" onClick={() => void hydrate()}>
+          <p className="mt-1.5 break-words text-[13px] text-muted">{loadError}</p>
+          <Button variant="primary" className="mt-5" onClick={retry}>
             Retry
           </Button>
         </div>
@@ -56,7 +68,7 @@ export function AppLayout() {
     );
   }
 
-  if (!hydrated) {
+  if (!hydrated || !mtfHydrated) {
     return (
       <div className="mx-auto w-full max-w-[1440px] p-6">
         <PageSkeleton />
