@@ -1,8 +1,11 @@
-/** LedgerX API — Cloudflare Worker (Hono). Phase 4: adds Supabase-JWT auth.
+/** LedgerX API — Cloudflare Worker (Hono).
  *  Public: GET /health, GET / . Protected (Bearer token): everything under /api/*.
- *  No database yet — /api/me just echoes the authenticated user (Phases 5–7 add data). */
+ *  Phase 4 added auth (/api/me); Phase 5 adds trades CRUD as a thin authenticated
+ *  proxy to Supabase PostgREST — the caller's JWT is forwarded so Postgres RLS
+ *  scopes every row to them, and reads stream through unparsed (flat CPU). */
 
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { cors } from "hono/cors";
 import { createMiddleware } from "hono/factory";
 
@@ -76,6 +79,107 @@ app.use("/api/*", authMiddleware);
 app.get("/api/me", (c) => {
   const user = c.get("user");
   return c.json({ userId: user.id, email: user.email });
+});
+
+// ── Trades API (Phase 5) ─────────────────────────────────────────────────────
+// A thin authenticated proxy to PostgREST. The caller's validated JWT is
+// forwarded on every call, so Postgres RLS decides which rows are visible — the
+// Worker holds no service_role key. Reads pipe bytes straight through (never
+// parsed) so CPU stays flat at any row count.
+
+const REST = (c: Context<Env>, path: string) => `${c.env.SUPABASE_URL}/rest/v1/${path}`;
+
+/** The bearer token authMiddleware already validated for this request. */
+const bearer = (c: Context<Env>) => (c.req.header("Authorization") ?? "").slice(7).trim();
+
+/** PostgREST headers — forward the caller's token so RLS applies. `extra` adds
+ *  Content-Type / Prefer for writes. */
+const sb = (c: Context<Env>, extra: Record<string, string> = {}): Record<string, string> => ({
+  apikey: c.env.SUPABASE_ANON_KEY,
+  Authorization: `Bearer ${bearer(c)}`,
+  ...extra,
+});
+
+const WRITE = { "Content-Type": "application/json", Prefer: "return=representation" };
+const REPRESENT = { Prefer: "return=representation" };
+
+/** Forward a PostgREST response verbatim — status + streamed body, no parsing.
+ *  Errors flow through unchanged (D4) so Phase 7 sees exactly what failed. */
+const passthrough = (res: Response) =>
+  new Response(res.body, { status: res.status, headers: { "content-type": "application/json" } });
+
+// GET /api/trades — all of the caller's trades. PASS-THROUGH: the body is never
+// read here, so CPU does not scale with row count. RLS does the user scoping —
+// no user_id filter (that would mask an RLS misconfiguration).
+app.get("/api/trades", async (c) => {
+  const res = await fetch(REST(c, "trades?select=*"), { headers: sb(c) });
+  return passthrough(res);
+});
+
+// POST /api/trades — insert one trade or an array. The request body is parsed
+// (small), and user_id is forced to the token's id on every record (D1); any
+// client-supplied user_id is dropped by the overwrite.
+app.post("/api/trades", async (c) => {
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid JSON body" }, 400);
+  }
+  const uid = c.get("user").id;
+  const rows = (Array.isArray(body) ? body : [body]).map((r) => ({
+    ...(r as Record<string, unknown>),
+    user_id: uid,
+  }));
+  const res = await fetch(REST(c, "trades"), {
+    method: "POST",
+    headers: sb(c, WRITE),
+    body: JSON.stringify(rows),
+  });
+  return passthrough(res);
+});
+
+// PATCH /api/trades/:id — partial update of one trade. user_id is stripped so it
+// can never be reassigned. The id is URL-encoded (client-supplied string).
+app.patch("/api/trades/:id", async (c) => {
+  let body: Record<string, unknown>;
+  try {
+    body = (await c.req.json()) as Record<string, unknown>;
+  } catch {
+    return c.json({ error: "invalid JSON body" }, 400);
+  }
+  delete body.user_id;
+  delete body.id; // the URL param is the sole source of row identity
+  const id = encodeURIComponent(c.req.param("id"));
+  const res = await fetch(REST(c, `trades?id=eq.${id}`), {
+    method: "PATCH",
+    headers: sb(c, WRITE),
+    body: JSON.stringify(body),
+  });
+  return passthrough(res);
+});
+
+// DELETE /api/trades/:id — delete one trade.
+app.delete("/api/trades/:id", async (c) => {
+  const id = encodeURIComponent(c.req.param("id"));
+  const res = await fetch(REST(c, `trades?id=eq.${id}`), { method: "DELETE", headers: sb(c, REPRESENT) });
+  return passthrough(res);
+});
+
+// DELETE /api/trades — bulk delete, body {"ids":[...]}. An empty or absent list
+// is a safe no-op (never a mass delete), returning 200 [] without touching the DB.
+app.delete("/api/trades", async (c) => {
+  let body: { ids?: unknown };
+  try {
+    body = (await c.req.json()) as { ids?: unknown };
+  } catch {
+    body = {};
+  }
+  const ids = Array.isArray(body.ids) ? body.ids.map((x) => String(x)).filter(Boolean) : [];
+  if (ids.length === 0) return c.json([], 200);
+  const list = ids.map((id) => encodeURIComponent(id)).join(",");
+  const res = await fetch(REST(c, `trades?id=in.(${list})`), { method: "DELETE", headers: sb(c, REPRESENT) });
+  return passthrough(res);
 });
 
 app.notFound((c) => c.json({ error: "not_found", service: "ledgerx-api" }, 404));

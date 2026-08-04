@@ -64,3 +64,40 @@ at build time, so **trigger a Pages redeploy** after adding them.
 `SUPABASE_URL` / `SUPABASE_ANON_KEY` are already in `wrangler.toml [vars]` (both
 public). Run `npx wrangler deploy` to push the auth-enabled Worker. The
 `service_role` key is never used anywhere.
+
+## Trades API (Phase 5)
+
+Thin authenticated proxy to Supabase PostgREST. Every route requires
+`Authorization: Bearer <token>`; the token is forwarded to PostgREST so Postgres
+RLS scopes rows to the caller. The Worker holds no `service_role` key. Reads
+stream the PostgREST body straight through (never parsed) so CPU stays flat.
+
+| Method | Path | Body | Notes |
+|---|---|---|---|
+| `GET` | `/api/trades` | — | all the caller's trades (pass-through stream) |
+| `POST` | `/api/trades` | one Trade **or** an array | bulk insert; `user_id` forced from token |
+| `PATCH` | `/api/trades/:id` | partial Trade | `user_id` stripped; id URL-encoded |
+| `DELETE` | `/api/trades/:id` | — | delete one |
+| `DELETE` | `/api/trades` | `{"ids":[...]}` | bulk delete; empty list = safe no-op |
+
+- `user_id` always comes from the validated token; any client-supplied value is
+  ignored (RLS would reject a mismatch too).
+- Errors pass through with PostgREST's status and body — not translated.
+
+### Known limit — pagination (not implemented)
+PostgREST returns **at most 1000 rows** per request by default. With ~25 trades
+this is years away. When it matters, page with a `Range` header (e.g.
+`Range: 0-999`, then `1000-1999`, …) on the `GET /api/trades` fetch; no schema
+change is needed.
+
+### Testing the API
+```powershell
+# In the browser console at http://localhost:5173 while signed in:
+#   const { data } = await (await import("/src/lib/supabase.ts")).supabase.auth.getSession();
+#   copy(data.session.access_token);
+$env:LEDGERX_TOKEN="<paste the token>"
+# optional: $env:LEDGERX_API="http://localhost:8787"   (default)
+node test-api.mjs
+```
+`test-api.mjs` exercises every route and deletes every row it creates. Tokens
+expire after ~1 hour — if it starts returning 401, grab a fresh one.
