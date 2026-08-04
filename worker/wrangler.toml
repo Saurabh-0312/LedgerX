@@ -7,4 +7,4 @@ compatibility_date = "2026-08-01"
 # (one or more DNS labels). Edit here to add origins — no code change needed.
 # Add your production custom domain here later if you use one.
 [vars]
-CORS_ORIGINS = "http://localhost:5173,https://*.pages.dev"
+CORS_ORIGINS = "http://localhost:5173,https://ledgerx.pages.dev,https://*.ledgerx.pages.dev"
