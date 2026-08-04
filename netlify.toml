@@ -1,0 +1,13 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# SPA fallback — every route serves index.html so client-side routes
+# (/mtf, /mtf/:id, /trades, …) work on direct load & refresh, not just in-app nav.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
