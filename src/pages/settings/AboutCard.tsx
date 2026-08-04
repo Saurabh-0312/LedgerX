@@ -47,14 +47,11 @@ export function AboutCard() {
           Vite · React 18 · TypeScript · Tailwind CSS v4 · Recharts 2 · zustand · react-router 6
         </AboutRow>
         <AboutRow label="Storage">
-          All data lives in your browser (localStorage) — nothing is sent to a server.
-          {footprint && (
-            <span className="text-muted">
-              {" "}
-              Currently ~{footprint} across {formatNumber(tradeCount)} trades and {formatNumber(journalCount)} journal
-              entries.
-            </span>
-          )}
+          Your data is stored in your LedgerX account and synced across devices.
+          <span className="text-muted">
+            {" "}
+            Currently {formatNumber(tradeCount)} trades and {formatNumber(journalCount)} journal entries.
+          </span>
         </AboutRow>
       </dl>
     </Card>

@@ -1,16 +1,22 @@
 import { Suspense, useEffect, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
+import { AlertTriangle } from "lucide-react";
 import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
 import { CommandPalette } from "./CommandPalette";
 import { Toaster } from "@/components/ui/Toaster";
 import { PageSkeleton } from "@/components/ui/Skeleton";
+import { Button } from "@/components/ui/Button";
+import { useStore } from "@/store/useStore";
 
 /** App shell: collapsible sidebar + topbar + routed page content. */
 export function AppLayout() {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("ledgerx-sidebar") === "1");
   const [paletteOpen, setPaletteOpen] = useState(false);
   const location = useLocation();
+  const hydrated = useStore((s) => s.hydrated);
+  const hydrateError = useStore((s) => s.hydrateError);
+  const hydrate = useStore((s) => s.hydrate);
 
   useEffect(() => {
     localStorage.setItem("ledgerx-sidebar", collapsed ? "1" : "0");
@@ -27,6 +33,36 @@ export function AppLayout() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  // Load the user's cloud data once — we're already behind RequireAuth (D7).
+  useEffect(() => {
+    void hydrate();
+  }, [hydrate]);
+
+  // Never render the app with empty arrays after a failed load — show Retry (D7).
+  if (hydrateError) {
+    return (
+      <div className="flex min-h-screen items-center justify-center p-6">
+        <div className="w-full max-w-md rounded-2xl border border-edge bg-raised p-6 text-center">
+          <AlertTriangle className="mx-auto mb-3 text-warning" size={28} aria-hidden />
+          <h1 className="text-[16px] font-semibold text-ink">Couldn’t load your data</h1>
+          <p className="mt-1.5 break-words text-[13px] text-muted">{hydrateError}</p>
+          <Button variant="primary" className="mt-5" onClick={() => void hydrate()}>
+            Retry
+          </Button>
+        </div>
+        <Toaster />
+      </div>
+    );
+  }
+
+  if (!hydrated) {
+    return (
+      <div className="mx-auto w-full max-w-[1440px] p-6">
+        <PageSkeleton />
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen">
