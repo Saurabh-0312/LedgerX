@@ -9,6 +9,7 @@ import { cors } from "hono/cors";
 import { createMiddleware } from "hono/factory";
 import { registerCrud } from "./crud";
 import { registerSettings } from "./settings";
+import { registerScreenshots } from "./screenshots";
 
 type Bindings = {
   /** Comma-separated allow-list; exact origin or one with a `*` wildcard label. */
@@ -17,6 +18,8 @@ type Bindings = {
   SUPABASE_URL: string;
   /** Public anon/publishable key — safe to ship; RLS is the real boundary. */
   SUPABASE_ANON_KEY: string;
+  /** R2 bucket for trade screenshots (Phase 10). */
+  SCREENSHOTS: R2Bucket;
 };
 
 type Variables = {
@@ -92,6 +95,7 @@ registerCrud(app, "watchlist", "watchlist_items");
 registerCrud(app, "mtf/positions", "mtf_positions");
 registerCrud(app, "mtf/brokers", "mtf_brokers");
 registerSettings(app);
+registerScreenshots(app);
 
 app.notFound((c) => c.json({ error: "not_found", service: "ledgerx-api" }, 404));
 

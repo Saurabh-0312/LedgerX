@@ -4,7 +4,7 @@
 import type { ChangeEvent, FormEvent } from "react";
 import { useEffect, useId, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, ImagePlus, Info, Save, SearchX, Trash2, Wand2 } from "lucide-react";
+import { ArrowLeft, ImagePlus, Info, Loader2, Save, SearchX, Trash2, Wand2 } from "lucide-react";
 import type { AssetClass, Exchange, MarketCondition, Timeframe, Trade, TradeSegment } from "@/types";
 import { nextTradeId, useStore } from "@/store/useStore";
 import { toast } from "@/store/toast";
@@ -20,6 +20,7 @@ import {
   taxCategoryFor,
 } from "@/lib/tradeMath";
 import { formatDate, formatMoney, formatPct } from "@/lib/format";
+import { toWebp, uploadScreenshot, useScreenshotUrl } from "@/lib/images";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -88,6 +89,8 @@ export default function TradeForm() {
 
   const [draft, setDraft] = useState<Draft>(() => makeDraft(editing, accounts, strategies));
   const [errors, setErrors] = useState<Errors>({});
+  const [shotUploading, setShotUploading] = useState(false);
+  const shot = useScreenshotUrl(draft.screenshotUrl || undefined);
 
   // re-seed the form when the route id changes (new ↔ edit, or a different trade)
   useEffect(() => {
@@ -199,7 +202,7 @@ export default function TradeForm() {
     ...(isMtfSeg ? [{ label: "MTF interest", value: calc.charges.mtfInterest, warn: true }] : []),
   ].filter((r) => r.value > 0 || r.warn);
 
-  const handleFile = (e: ChangeEvent<HTMLInputElement>) => {
+  const handleFile = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = ""; // allow re-selecting the same file later
     if (!file) return;
@@ -207,16 +210,22 @@ export default function TradeForm() {
       toast("Only image files can be attached", "error");
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result;
-      if (typeof result === "string") {
-        setDraft((d) => ({ ...d, screenshotUrl: result }));
-        toast("Screenshot attached", "info");
-      }
-    };
-    reader.onerror = () => toast("Could not read that file", "error");
-    reader.readAsDataURL(file);
+    if (file.size > 10 * 1024 * 1024) {
+      toast("That image is over 10 MB — please pick a smaller one", "error");
+      return;
+    }
+    setShotUploading(true);
+    try {
+      const webp = await toWebp(file); // downscale + WebP, client-side
+      const tradeId = editing ? editing.id : nextTradeId(trades);
+      const key = await uploadScreenshot(tradeId, webp); // → R2, returns the object key
+      setDraft((d) => ({ ...d, screenshotUrl: key }));
+      toast("Screenshot uploaded", "info");
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Could not upload that screenshot", "error");
+    } finally {
+      setShotUploading(false);
+    }
   };
 
   const handleSave = () => {
@@ -959,14 +968,29 @@ export default function TradeForm() {
 
             {/* 7 · Screenshot */}
             <Card title="Screenshot" subtitle="Attach a chart snapshot for later review">
-              {draft.screenshotUrl ? (
+              {shotUploading ? (
+                <div className="flex items-center gap-2 rounded-[10px] border border-edge bg-raised px-3 py-6 text-[13px] text-muted">
+                  <Loader2 size={15} className="animate-spin" aria-hidden />
+                  Converting to WebP &amp; uploading…
+                </div>
+              ) : draft.screenshotUrl ? (
                 <div className="space-y-3">
                   <div className="overflow-hidden rounded-[10px] border border-edge bg-raised">
-                    <img
-                      src={draft.screenshotUrl}
-                      alt="Trade screenshot preview"
-                      className="max-h-72 w-full object-contain"
-                    />
+                    {shot.loading ? (
+                      <div className="flex h-40 items-center justify-center text-faint">
+                        <Loader2 size={16} className="animate-spin" aria-hidden />
+                      </div>
+                    ) : shot.src ? (
+                      <img
+                        src={shot.src}
+                        alt="Trade screenshot preview"
+                        className="max-h-72 w-full object-contain"
+                      />
+                    ) : (
+                      <div className="flex h-40 items-center justify-center text-[12px] text-faint">
+                        Couldn’t load image
+                      </div>
+                    )}
                   </div>
                   <Button
                     type="button"
@@ -979,7 +1003,7 @@ export default function TradeForm() {
                   </Button>
                 </div>
               ) : (
-                <Field label="Chart image" hint="PNG or JPG — stored inline with the trade">
+                <Field label="Chart image" hint="PNG or JPG — converted to WebP and stored in the cloud">
                   {(fid) => (
                     <div className="flex items-center gap-3 rounded-[10px] border border-dashed border-edge bg-raised px-3 py-3">
                       <ImagePlus size={16} className="shrink-0 text-faint" aria-hidden />

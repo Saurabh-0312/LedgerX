@@ -110,6 +110,38 @@ delete. The client sends the complete object every time (no server-side merging)
 - The API adds **no cascade** on `accountId` (only `user_id → auth.users` cascades
   in the DB); the client issues any dependent deletes.
 
+## Screenshots — Cloudflare R2 (Phase 10, `worker/src/screenshots.ts`)
+
+Trade chart images live in R2, not the database. Both routes are authenticated
+(the same `/api/*` bearer token). **R2 has no row-level security — this Worker is
+the only access control**: keys are namespaced `<userId>/<tradeId>-<ts>.webp` and
+every read verifies the prefix.
+
+| Method | Path | Body | Notes |
+|---|---|---|---|
+| `POST` | `/api/screenshots/:tradeId` | raw image bytes (WebP) | Worker builds the key from the token + sanitised trade id; returns `{ key }`. Rejects > 2 MB with 413 |
+| `GET` | `/api/screenshots/:userId/:file` | — | streams the object; **prefix mismatch → 404** (never 403 — don't confirm another user's object exists) |
+
+- Conversion to WebP + downscale (≤1600 px) happens **client-side** before upload.
+- `screenshotUrl` in the DB holds either a legacy `data:` URI (rendered as-is) or
+  an R2 key; the frontend branches on `startsWith("data:")`.
+- Served with `Cache-Control: private, max-age=31536000, immutable` (keys are
+  unique per upload, so a cached response can never go stale).
+
+### R2 setup (one time)
+```powershell
+cd worker
+npx wrangler r2 bucket create ledgerx-screenshots
+npx wrangler deploy
+```
+`wrangler dev` binds a **simulated** local bucket, so local testing needs no
+remote bucket.
+
+### Known tradeoff — orphaned objects (accepted, D7)
+Deleting a trade does **not** delete its R2 object. With ~40 KB WebP files against
+10 GB of free-tier headroom (~260k images), orphans are cheap; there is no
+reference counting, lifecycle rule, or cleanup job by design.
+
 ### Known limit — pagination (not implemented)
 PostgREST returns **at most 1000 rows** per request by default. Well beyond any
 current collection. When it matters, page with a `Range` header (e.g.

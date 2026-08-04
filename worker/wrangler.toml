@@ -13,3 +13,9 @@ CORS_ORIGINS = "http://localhost:5173,https://ledgerx.pages.dev,https://*.ledger
 # the real boundary; the service_role key must NEVER go here.
 SUPABASE_URL = "https://wdkwwbszbydciywexmnn.supabase.co"
 SUPABASE_ANON_KEY = "sb_publishable_RfLi72zmr1A8vBNZG3xrFg_K8PKzDGW"
+
+# R2 bucket for trade screenshots (Phase 10). `wrangler dev` simulates it locally;
+# create the real bucket once with: npx wrangler r2 bucket create ledgerx-screenshots
+[[r2_buckets]]
+binding = "SCREENSHOTS"
+bucket_name = "ledgerx-screenshots"

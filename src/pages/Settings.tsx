@@ -7,6 +7,7 @@ import { ChargeRatesCard } from "@/pages/settings/ChargeRatesCard";
 import { TaxRatesCard } from "@/pages/settings/TaxRatesCard";
 import { AppearanceCard } from "@/pages/settings/AppearanceCard";
 import { MigrationCard } from "@/pages/settings/MigrationCard";
+import { ScreenshotsCard } from "@/pages/settings/ScreenshotsCard";
 import { DataCard } from "@/pages/settings/DataCard";
 import { AboutCard } from "@/pages/settings/AboutCard";
 
@@ -24,6 +25,7 @@ export default function Settings() {
         <TaxRatesCard />
         <AppearanceCard />
         <MigrationCard />
+        <ScreenshotsCard />
         <DataCard />
         <AboutCard />
       </div>

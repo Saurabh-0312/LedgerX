@@ -1,14 +1,16 @@
 /** Right-hand drawer with the full anatomy of a single trade:
  *  P&L header, fact grid, itemised charges, tax box, context notes, actions. */
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { format } from "date-fns";
-import { CircleCheck, Pencil, Trash2 } from "lucide-react";
+import { CircleCheck, Pencil, Trash2, X } from "lucide-react";
 import type { Rating, TaxCategory, Trade } from "@/types";
 import { useStore } from "@/store/useStore";
 import { toast } from "@/store/toast";
 import { computeCharges, computeGrossPnl } from "@/lib/tradeMath";
+import { useScreenshotUrl } from "@/lib/images";
 import {
   formatDateTime,
   formatDuration,
@@ -71,6 +73,17 @@ export function TradeDetailDrawer({ trade, onClose }: TradeDetailDrawerProps) {
   const chargeRates = useStore((s) => s.settings.chargeRates);
   const closeTradeAction = useStore((s) => s.closeTrade);
   const deleteTradeAction = useStore((s) => s.deleteTrade);
+  const shot = useScreenshotUrl(trade?.screenshotUrl);
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+
+  useEffect(() => {
+    if (!lightboxOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setLightboxOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [lightboxOpen]);
 
   const [closeOpen, setCloseOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -386,13 +399,54 @@ export function TradeDetailDrawer({ trade, onClose }: TradeDetailDrawerProps) {
       {trade.screenshotUrl && (
         <section className="mt-5" aria-label="Chart screenshot">
           <h3 className="label-caps mb-2">Screenshot</h3>
-          <img
-            src={trade.screenshotUrl}
-            alt={`${trade.symbol} chart screenshot`}
-            className="w-full rounded-xl border border-edge"
-          />
+          {shot.loading ? (
+            <div className="flex h-40 items-center justify-center rounded-xl border border-edge text-[12px] text-faint">
+              Loading…
+            </div>
+          ) : shot.src ? (
+            <button
+              type="button"
+              onClick={() => setLightboxOpen(true)}
+              className="block w-full cursor-zoom-in overflow-hidden rounded-xl border border-edge transition hover:border-accent/50"
+              aria-label="Enlarge screenshot"
+            >
+              <img src={shot.src} alt={`${trade.symbol} chart screenshot`} className="w-full" />
+            </button>
+          ) : (
+            <div className="flex h-40 items-center justify-center rounded-xl border border-edge text-[12px] text-faint">
+              Couldn’t load image
+            </div>
+          )}
         </section>
       )}
+
+      {lightboxOpen &&
+        shot.src &&
+        createPortal(
+          <div
+            className="animate-in fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-6 backdrop-blur-sm"
+            onClick={() => setLightboxOpen(false)}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Screenshot enlarged"
+          >
+            <img
+              src={shot.src}
+              alt={`${trade.symbol} chart screenshot, enlarged`}
+              className="max-h-[88vh] max-w-[92vw] rounded-xl object-contain shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            />
+            <button
+              type="button"
+              onClick={() => setLightboxOpen(false)}
+              aria-label="Close"
+              className="absolute right-5 top-5 flex h-9 w-9 items-center justify-center rounded-full bg-surface/80 text-muted ring-1 ring-edge transition hover:text-ink"
+            >
+              <X size={18} aria-hidden />
+            </button>
+          </div>,
+          document.body,
+        )}
 
       {/* ── actions ───────────────────────────────────────────────── */}
       <div className="sticky bottom-0 -mx-5 -mb-5 mt-6 flex items-center gap-2 border-t border-edge bg-surface/95 px-5 py-3 backdrop-blur">
