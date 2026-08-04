@@ -4,35 +4,16 @@ import { useRef, useState } from "react";
 import type { ChangeEvent, ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import { Download, RefreshCw, Trash2, Upload } from "lucide-react";
-import type { Trade } from "@/types";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Field, Input } from "@/components/ui/Field";
 import { Modal } from "@/components/ui/Modal";
 import { useStore } from "@/store/useStore";
+import { useMtfStore } from "@/store/useMtfStore";
 import { toast } from "@/store/toast";
 import { downloadFile } from "@/lib/csv";
 import { formatNumber } from "@/lib/format";
-
-/** Loose structural check — enough to keep the strict Trade shape honest on import. */
-function isTradeLike(x: unknown): x is Trade {
-  if (typeof x !== "object" || x === null) return false;
-  const t = x as Record<string, unknown>;
-  return (
-    typeof t.id === "string" &&
-    typeof t.accountId === "string" &&
-    typeof t.symbol === "string" &&
-    typeof t.status === "string" &&
-    typeof t.quantity === "number" &&
-    typeof t.entryPrice === "number" &&
-    typeof t.openedAt === "string" &&
-    typeof t.grossPnl === "number" &&
-    typeof t.netPnl === "number" &&
-    typeof t.charges === "object" &&
-    t.charges !== null &&
-    Array.isArray(t.tags)
-  );
-}
+import { buildBackup, dedupeById, parseBackup } from "@/lib/backup";
 
 interface DataRowProps {
   icon: LucideIcon;
@@ -67,11 +48,27 @@ export function DataCard() {
   const cashTransactions = useStore((s) => s.cashTransactions);
   const journal = useStore((s) => s.journal);
   const goals = useStore((s) => s.goals);
+  const portfolioTargets = useStore((s) => s.portfolioTargets);
   const watchlist = useStore((s) => s.watchlist);
   const settings = useStore((s) => s.settings);
   const importTrades = useStore((s) => s.importTrades);
+  const addAccount = useStore((s) => s.addAccount);
+  const addCashTransaction = useStore((s) => s.addCashTransaction);
+  const addJournalEntry = useStore((s) => s.addJournalEntry);
+  const addWatchItem = useStore((s) => s.addWatchItem);
+  const setGoals = useStore((s) => s.setGoals);
+  const setTargetPercents = useStore((s) => s.setTargetPercents);
+  const setMonthCapital = useStore((s) => s.setMonthCapital);
+  const updateSettings = useStore((s) => s.updateSettings);
   const resetSampleData = useStore((s) => s.resetSampleData);
   const clearAllData = useStore((s) => s.clearAllData);
+
+  const mtfPositions = useMtfStore((s) => s.positions);
+  const mtfBrokers = useMtfStore((s) => s.brokers);
+  const mtfAccountValue = useMtfStore((s) => s.accountValue);
+  const addPosition = useMtfStore((s) => s.addPosition);
+  const addBroker = useMtfStore((s) => s.addBroker);
+  const setAccountValue = useMtfStore((s) => s.setAccountValue);
 
   const fileRef = useRef<HTMLInputElement>(null);
   const [resetOpen, setResetOpen] = useState(false);
@@ -79,45 +76,145 @@ export function DataCard() {
   const [clearText, setClearText] = useState("");
 
   const exportBackup = () => {
-    downloadFile(
-      "ledgerx-backup.json",
-      JSON.stringify({ trades, accounts, cashTransactions, journal, goals, watchlist, settings }, null, 2),
-      "application/json",
+    const envelope = buildBackup(
+      { trades, accounts, cashTransactions, journal, goals, portfolioTargets, watchlist, settings },
+      { positions: mtfPositions, brokers: mtfBrokers, accountValue: mtfAccountValue },
+      new Date().toISOString(),
     );
-    toast(`Backup exported — ${formatNumber(trades.length)} trades included`);
+    downloadFile("ledgerx-backup.json", JSON.stringify(envelope, null, 2), "application/json");
+    toast(`Backup exported — ${formatNumber(trades.length)} trades and MTF data included`);
   };
 
-  const handleBackupText = (text: string) => {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      toast("That file isn't valid JSON", "error");
-      return;
-    }
-    if (typeof parsed !== "object" || parsed === null || !Array.isArray((parsed as { trades?: unknown }).trades)) {
-      toast("No trades array found — export a backup from LedgerX first", "error");
-      return;
-    }
-    const rows = (parsed as { trades: unknown[] }).trades;
-    const valid = rows.filter(isTradeLike);
-    if (valid.length === 0) {
+  /** Legacy flat backup — trades only, preserving the original behaviour/copy. */
+  const restoreLegacy = (validTrades: typeof trades, unreadable: number) => {
+    if (validTrades.length === 0) {
       toast("The backup contains no readable trades", "error");
       return;
     }
     const existing = new Set(trades.map((t) => t.id));
-    const fresh = valid.filter((t) => !existing.has(t.id));
-    const dupes = valid.length - fresh.length;
-    const unreadable = rows.length - valid.length;
+    const { fresh, dupes } = dedupeById(validTrades, existing);
     if (fresh.length === 0) {
-      toast(`All ${valid.length} trades in the backup already exist — nothing imported`, "info");
+      toast(`All ${validTrades.length} trades in the backup already exist — nothing imported`, "info");
       return;
     }
     importTrades(fresh);
     const parts = [`Imported ${fresh.length} trade${fresh.length === 1 ? "" : "s"}`];
-    if (dupes > 0) parts.push(`${dupes} duplicate${dupes === 1 ? "" : "s"} skipped`);
+    if (dupes.length > 0) parts.push(`${dupes.length} duplicate${dupes.length === 1 ? "" : "s"} skipped`);
     if (unreadable > 0) parts.push(`${unreadable} unreadable skipped`);
-    toast(`${parts.join(" · ")} — this build restores trades only`);
+    toast(`${parts.join(" · ")} — legacy backup, trades only`);
+  };
+
+  const handleBackupText = (text: string) => {
+    const result = parseBackup(text);
+    if (!result.ok) {
+      toast(result.error, "error");
+      return;
+    }
+    const { data } = result;
+
+    if (data.legacy) {
+      restoreLegacy(data.ledgerx.trades, data.invalid.trades);
+      return;
+    }
+
+    // ── v2 envelope — additive restore of every id-collection ──────────
+    const lx = data.ledgerx;
+    const mtf = data.mtf;
+    const parts: string[] = [];
+    let restoredTotal = 0;
+    let skippedTotal = 0;
+
+    const add = (restored: number, skipped: number, singular: string, plural: string) => {
+      restoredTotal += restored;
+      skippedTotal += skipped;
+      if (restored === 0 && skipped === 0) return;
+      let s = `${restored} ${restored === 1 ? singular : plural}`;
+      if (skipped > 0) s += ` (${skipped} skipped)`;
+      parts.push(s);
+    };
+
+    // Trades — preserve existing de-dup (skip if id already exists).
+    {
+      const existing = new Set(trades.map((t) => t.id));
+      const { fresh, dupes } = dedupeById(lx.trades, existing);
+      if (fresh.length > 0) importTrades(fresh);
+      add(fresh.length, dupes.length + data.invalid.trades, "trade", "trades");
+    }
+    // Accounts
+    {
+      const existing = new Set(accounts.map((a) => a.id));
+      const { fresh, dupes } = dedupeById(lx.accounts, existing);
+      fresh.forEach(addAccount);
+      add(fresh.length, dupes.length + data.invalid.accounts, "account", "accounts");
+    }
+    // Cash transactions
+    {
+      const existing = new Set(cashTransactions.map((c) => c.id));
+      const { fresh, dupes } = dedupeById(lx.cashTransactions, existing);
+      fresh.forEach(addCashTransaction);
+      add(fresh.length, dupes.length + data.invalid.cashTransactions, "cash txn", "cash txns");
+    }
+    // Journal
+    {
+      const existing = new Set(journal.map((e) => e.id));
+      const { fresh, dupes } = dedupeById(lx.journal, existing);
+      fresh.forEach(addJournalEntry);
+      add(fresh.length, dupes.length + data.invalid.journal, "journal entry", "journal entries");
+    }
+    // Watchlist
+    {
+      const existing = new Set(watchlist.map((w) => w.id));
+      const { fresh, dupes } = dedupeById(lx.watchlist, existing);
+      fresh.forEach(addWatchItem);
+      add(fresh.length, dupes.length + data.invalid.watchlist, "watch item", "watch items");
+    }
+    // MTF positions
+    {
+      const existing = new Set(mtfPositions.map((p) => p.id));
+      const { fresh, dupes } = dedupeById(mtf.positions, existing);
+      fresh.forEach(addPosition);
+      add(fresh.length, dupes.length + data.invalid.mtfPositions, "MTF position", "MTF positions");
+    }
+    // MTF brokers
+    {
+      const existing = new Set(mtfBrokers.map((b) => b.id));
+      const { fresh, dupes } = dedupeById(mtf.brokers, existing);
+      fresh.forEach(addBroker);
+      add(fresh.length, dupes.length + data.invalid.mtfBrokers, "MTF broker", "MTF brokers");
+    }
+
+    // Singletons — not id-deduped; noted separately in the summary.
+    if (lx.settings) {
+      updateSettings(lx.settings);
+      parts.push("settings merged");
+    }
+    if (lx.goals) {
+      setGoals(lx.goals);
+      parts.push("goals replaced");
+    }
+    if (lx.portfolioTargets) {
+      setTargetPercents(lx.portfolioTargets.percents);
+      const months = Object.entries(lx.portfolioTargets.capitalByMonth);
+      let monthCount = 0;
+      for (const [ym, value] of months) {
+        if (typeof value === "number") {
+          setMonthCapital(ym, value);
+          monthCount += 1;
+        }
+      }
+      parts.push(`${monthCount} monthly target${monthCount === 1 ? "" : "s"}`);
+    }
+    if (mtf.accountValue !== null) {
+      setAccountValue(mtf.accountValue);
+      parts.push("MTF account value set");
+    }
+
+    if (parts.length === 0) {
+      toast("Nothing to import — the backup was empty", "info");
+      return;
+    }
+    const tone = restoredTotal === 0 && skippedTotal > 0 ? "info" : "success";
+    toast(`Restored ${parts.join(" · ")}`, tone);
   };
 
   const onFilePicked = (e: ChangeEvent<HTMLInputElement>) => {
@@ -168,7 +265,7 @@ export function DataCard() {
         <DataRow
           icon={Upload}
           title="Import trades from backup"
-          description="Pick a ledgerx-backup.json — trades are validated and appended, duplicates skipped by id. This build restores trades only."
+          description="Pick a ledgerx-backup.json — every collection is validated and appended, duplicates skipped by id."
           action={
             <>
               <input
