@@ -15,6 +15,24 @@ async function authHeaders(): Promise<Record<string, string>> {
   return { Authorization: `Bearer ${token}` };
 }
 
+/** PostgREST rejects a bulk insert whose objects don't all share the same keys
+ *  (PGRST102). Real records legitimately differ — only Closed trades carry
+ *  exitPrice, only some carry screenshotUrl — so pad every element of an insert
+ *  array to the union of keys, using null for absent ones. POST only: doing this
+ *  on PATCH/PUT would null out fields the caller never meant to touch. */
+function padInsertArray(body: unknown): unknown {
+  if (!Array.isArray(body) || body.length < 2) return body;
+  const rows = body as Record<string, unknown>[];
+  if (!rows.every((r) => r !== null && typeof r === "object" && !Array.isArray(r))) return body;
+  const keys = new Set<string>();
+  for (const r of rows) for (const k of Object.keys(r)) keys.add(k);
+  return rows.map((r) => {
+    const out: Record<string, unknown> = {};
+    for (const k of keys) out[k] = r[k] === undefined ? null : r[k];
+    return out;
+  });
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const headers = await authHeaders();
   if (body !== undefined) headers["Content-Type"] = "application/json";
@@ -38,7 +56,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 
 export const api = {
   get: <T>(path: string) => request<T>("GET", path),
-  post: <T = unknown>(path: string, body: unknown) => request<T>("POST", path, body),
+  post: <T = unknown>(path: string, body: unknown) => request<T>("POST", path, padInsertArray(body)),
   patch: <T = unknown>(path: string, body: unknown) => request<T>("PATCH", path, body),
   put: <T = unknown>(path: string, body: unknown) => request<T>("PUT", path, body),
   del: <T = unknown>(path: string, body?: unknown) => request<T>("DELETE", path, body),
