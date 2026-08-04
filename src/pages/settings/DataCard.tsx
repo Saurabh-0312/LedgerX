@@ -69,6 +69,7 @@ export function DataCard() {
   const addPosition = useMtfStore((s) => s.addPosition);
   const addBroker = useMtfStore((s) => s.addBroker);
   const setAccountValue = useMtfStore((s) => s.setAccountValue);
+  const clearMtf = useMtfStore((s) => s.clearAll);
 
   const fileRef = useRef<HTMLInputElement>(null);
   const [resetOpen, setResetOpen] = useState(false);
@@ -204,7 +205,9 @@ export function DataCard() {
       }
       parts.push(`${monthCount} monthly target${monthCount === 1 ? "" : "s"}`);
     }
-    if (mtf.accountValue !== null) {
+    // Only restore a real value — a backup holding 0 (unset) must not clobber
+    // an account value the user has since entered.
+    if (mtf.accountValue !== null && mtf.accountValue > 0) {
       setAccountValue(mtf.accountValue);
       parts.push("MTF account value set");
     }
@@ -240,6 +243,7 @@ export function DataCard() {
 
   const confirmClear = () => {
     clearAllData();
+    clearMtf(); // clearAllData only touches ledgerx-store; MTF has its own store
     closeClear();
     toast("All data cleared from this browser", "info");
   };
@@ -255,7 +259,7 @@ export function DataCard() {
         <DataRow
           icon={Download}
           title="Export all data (JSON)"
-          description="Download trades, accounts, journal, goals, watchlist and settings as a single ledgerx-backup.json."
+          description="Download every trade, account, cash transaction, journal entry, goal, monthly target, watchlist item, setting and MTF position as a single ledgerx-backup.json."
           action={
             <Button variant="outline" size="sm" icon={Download} onClick={exportBackup}>
               Export JSON
