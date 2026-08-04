@@ -99,4 +99,19 @@ registerScreenshots(app);
 
 app.notFound((c) => c.json({ error: "not_found", service: "ledgerx-api" }, 404));
 
-export default app;
+/** Daily keep-alive (Phase 11) so the free Supabase project never hits its 7-day
+ *  idle pause. One UNAUTHENTICATED PostgREST read — RLS returns [] for anon,
+ *  which is fine: Postgres was reached, so the idle timer resets. No bearer token
+ *  (there is no user session in a cron), and nothing is written. */
+async function scheduled(_controller: ScheduledController, env: Bindings): Promise<void> {
+  try {
+    const res = await fetch(`${env.SUPABASE_URL}/rest/v1/trades?select=id&limit=1`, {
+      headers: { apikey: env.SUPABASE_ANON_KEY },
+    });
+    console.log(`[cron] Supabase keep-alive → ${res.status}`);
+  } catch (e) {
+    console.log(`[cron] keep-alive failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+export default { fetch: app.fetch, scheduled };

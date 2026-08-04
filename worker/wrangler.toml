@@ -19,3 +19,8 @@ SUPABASE_ANON_KEY = "sb_publishable_RfLi72zmr1A8vBNZG3xrFg_K8PKzDGW"
 [[r2_buckets]]
 binding = "SCREENSHOTS"
 bucket_name = "ledgerx-screenshots"
+
+# Daily keep-alive (Phase 11) so the free Supabase project never idles into its
+# 7-day pause — the scheduled() handler makes one unauthenticated PostgREST read.
+[triggers]
+crons = ["0 3 * * *"] # 03:00 UTC daily

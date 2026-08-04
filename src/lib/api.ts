@@ -33,7 +33,7 @@ function padInsertArray(body: unknown): unknown {
   });
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+async function request<T>(method: string, path: string, body?: unknown, retried = false): Promise<T> {
   const headers = await authHeaders();
   if (body !== undefined) headers["Content-Type"] = "application/json";
   const res = await fetch(`${BASE}${path}`, {
@@ -41,6 +41,14 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
   });
+  // The Worker's authMiddleware rejects an expired token with 401 BEFORE the
+  // request ever reaches PostgREST, so a 401 means the DB was never touched —
+  // re-sending is safe even for a POST (no duplicate write). Refresh the token
+  // and retry ONCE. Only on 401, never on other 4xx/5xx (a 400 would loop).
+  if (res.status === 401 && !retried) {
+    await supabase.auth.refreshSession();
+    return request<T>(method, path, body, true);
+  }
   if (!res.ok) {
     let detail = "";
     try {

@@ -20,6 +20,20 @@ async function bearer(): Promise<string> {
   return token;
 }
 
+/** fetch with the bearer token; on a 401 (expired token) refresh once and retry
+ *  the same request. The Worker rejects before touching R2, and the Blob body is
+ *  re-readable, so re-sending is safe. Retry once, only on 401. */
+async function authedFetch(url: string, init: RequestInit = {}, retried = false): Promise<Response> {
+  const headers = new Headers(init.headers);
+  headers.set("Authorization", `Bearer ${await bearer()}`);
+  const res = await fetch(url, { ...init, headers });
+  if (res.status === 401 && !retried) {
+    await supabase.auth.refreshSession();
+    return authedFetch(url, init, true);
+  }
+  return res;
+}
+
 /** Is this a legacy inline data-URI (vs an R2 object key)? Pure. */
 export const isDataUri = (value: string): boolean => value.startsWith("data:");
 
@@ -90,9 +104,9 @@ export function dataUriToBlob(uri: string): Blob {
 /** Upload a screenshot Blob for a trade → returns the R2 object key. The Worker
  *  builds the key from the token + a sanitised trade id (D3); we never send one. */
 export async function uploadScreenshot(tradeId: string, blob: Blob): Promise<string> {
-  const res = await fetch(`${API_BASE}/api/screenshots/${encodeURIComponent(tradeId)}`, {
+  const res = await authedFetch(`${API_BASE}/api/screenshots/${encodeURIComponent(tradeId)}`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${await bearer()}`, "Content-Type": blob.type || "image/webp" },
+    headers: { "Content-Type": blob.type || "image/webp" },
     body: blob,
   });
   if (!res.ok) throw new Error(`Upload failed (${res.status})`);
@@ -104,7 +118,7 @@ export async function uploadScreenshot(tradeId: string, blob: Blob): Promise<str
  *  <img src>. `data:` values pass through unchanged. Caller revokes the URL. */
 export async function screenshotObjectUrl(value: string): Promise<string> {
   if (isDataUri(value)) return value;
-  const res = await fetch(screenshotSrc(value), { headers: { Authorization: `Bearer ${await bearer()}` } });
+  const res = await authedFetch(screenshotSrc(value));
   if (!res.ok) throw new Error(`Load failed (${res.status})`);
   return URL.createObjectURL(await res.blob());
 }

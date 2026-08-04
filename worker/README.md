@@ -1,7 +1,11 @@
 # LedgerX API — Cloudflare Worker (Hono)
 
-Phase 3 scaffold: `GET /health` + `GET /` + CORS. No DB/auth/data routes yet.
-Isolated package — the frontend's root `package.json` is untouched.
+The production LedgerX backend: a thin **authenticated proxy** in front of Supabase
+Postgres (PostgREST) + Auth, with trade screenshots in **Cloudflare R2** and a daily
+**keep-alive cron**. `GET /health` and `GET /` are public; everything under `/api/*`
+requires a Supabase bearer token, which the Worker forwards to PostgREST so **RLS**
+scopes every row. It holds no `service_role` key. Isolated package — the frontend's
+root `package.json` is untouched.
 
 ## Local dev
 
@@ -38,6 +42,11 @@ CORS origins live in `wrangler.toml` → `[vars] CORS_ORIGINS` (comma-separated,
    (`/*  /index.html  200`), which Vite copies to `dist/_redirects` and Cloudflare
    Pages honors. Verify `https://ledgerx.pages.dev/trades` and `/settings` load on
    hard refresh; if either 404s, confirm `dist/_redirects` is present in the build.
+
+> **Netlify is decommissioned.** Cloudflare Pages is the sole production host — it
+> sits next to the Worker + R2 on one platform and one login. The root
+> `netlify.toml` / `vercel.json` are kept only as reference configs for the
+> pre-cloud static build; no live deploy targets them.
 
 ## Phase 4 — Auth setup (one time, needs the dashboard)
 
@@ -119,10 +128,11 @@ every read verifies the prefix.
 
 | Method | Path | Body | Notes |
 |---|---|---|---|
-| `POST` | `/api/screenshots/:tradeId` | raw image bytes (WebP) | Worker builds the key from the token + sanitised trade id; returns `{ key }`. Rejects > 2 MB with 413 |
+| `POST` | `/api/screenshots/:tradeId` | raw image bytes (WebP) | Worker builds the key from the token + sanitised trade id; returns `{ key }`. Rejects > 4 MB with 413 |
 | `GET` | `/api/screenshots/:userId/:file` | — | streams the object; **prefix mismatch → 404** (never 403 — don't confirm another user's object exists) |
 
-- Conversion to WebP + downscale (≤1600 px) happens **client-side** before upload.
+- Conversion to WebP + downscale (longest edge ≤ 2400 px, quality 0.92) happens
+  **client-side** before upload — large enough to keep chart text legible.
 - `screenshotUrl` in the DB holds either a legacy `data:` URI (rendered as-is) or
   an R2 key; the frontend branches on `startsWith("data:")`.
 - Served with `Cache-Control: private, max-age=31536000, immutable` (keys are
@@ -155,6 +165,33 @@ LedgerX value is displayed and calculated to 2 decimals, so this is invisible in
 practice and **accepted**. `jsonb` (numbers stored as `numeric`) is unaffected.
 For byte-exact float output, run `alter role authenticator set extra_float_digits = 3;`
 in the Supabase SQL editor (a runtime setting, not a schema migration).
+
+## Keep-alive cron (Phase 11)
+
+A free Supabase project **pauses after 7 days of inactivity**, which would break the
+app until someone manually resumes it. To prevent that, the Worker runs a daily
+`scheduled` handler that touches Postgres once:
+
+```toml
+# wrangler.toml
+[triggers]
+crons = ["0 3 * * *"]   # 03:00 UTC daily
+```
+
+```ts
+// worker/src/index.ts — one UNAUTHENTICATED PostgREST read
+GET {SUPABASE_URL}/rest/v1/trades?select=id&limit=1   (apikey header only)
+```
+
+- **No bearer token, no writes.** With no user JWT, RLS returns `[]` for the anon
+  role — which is exactly fine: Postgres was *reached*, so its idle timer resets.
+  The handler logs `[cron] Supabase keep-alive → <status>` and nothing else.
+- **Cron Triggers work on the Workers free plan** — no paid tier required.
+- `export default { fetch: app.fetch, scheduled }` wires both entrypoints; a normal
+  `npx wrangler deploy` registers the trigger. Confirm it under
+  **Workers & Pages → ledgerx-api → Settings → Triggers → Cron Triggers**.
+- Test on demand without waiting for 03:00 UTC:
+  `npx wrangler dev` then `curl "http://localhost:8787/__scheduled?cron=0+3+*+*+*"`.
 
 ### Testing the API
 ```powershell

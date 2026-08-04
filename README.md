@@ -12,6 +12,8 @@ A dark-theme trading journal for Indian markets, where brokerage, STT, stamp dut
   <img alt="Vite" src="https://img.shields.io/badge/Vite-6-646CFF?logo=vite&logoColor=white">
   <img alt="Tailwind" src="https://img.shields.io/badge/Tailwind-v4-06B6D4?logo=tailwindcss&logoColor=white">
   <img alt="Recharts" src="https://img.shields.io/badge/Recharts-2.15-FF6384">
+  <img alt="Supabase" src="https://img.shields.io/badge/Supabase-Postgres_·_Auth-3ECF8E?logo=supabase&logoColor=white">
+  <img alt="Cloudflare" src="https://img.shields.io/badge/Cloudflare-Workers_·_Pages_·_R2-F38020?logo=cloudflare&logoColor=white">
   <img alt="License" src="https://img.shields.io/badge/license-all_rights_reserved-lightgrey">
 </p>
 
@@ -137,7 +139,8 @@ Tax parameters for FY 2025-26 are editable too: ₹4,00,000 basic exemption, ₹
 | **Build** | Vite 6 · TypeScript 5.7 `strict` · Node 20 |
 | **UI** | React 18.3 · Tailwind CSS v4 (`@theme` tokens, zero config file) |
 | **Charts** | Recharts 2.15 |
-| **State** | Zustand 5 + `persist` |
+| **State** | Zustand 5 — optimistic, API-backed |
+| **Backend** | Cloudflare Worker + Hono · Supabase Postgres (RLS) · Supabase Auth · Cloudflare R2 |
 | **Routing** | React Router 6.28, lazy routes |
 | **Dates** | date-fns 4 |
 | **Icons** | lucide-react |
@@ -158,9 +161,15 @@ npm run dev
 
 → **http://localhost:5173**
 
-It boots with a seeded sample dataset — real Indian instruments, Nov 2025 to Jun 2026, including options, futures and crypto — so every chart has something to show on first load. Same seed, same data, every time.
+The app is cloud-backed now, so local dev needs two things running and a `.env`:
 
-Want a blank slate? **Settings → Data management → Clear all data.**
+```bash
+cp .env.example .env    # fill in VITE_SUPABASE_URL / ANON_KEY / VITE_API_URL
+cd worker && npx wrangler dev    # the API on :8787 (simulated R2, no remote needed)
+npm run dev                       # the app on :5173, in another terminal
+```
+
+Sign in (Supabase Auth) and your data loads from Postgres. New accounts start empty; add a trade and it persists in the cloud. Want a blank slate again? **Settings → Data management → Clear all data.**
 
 | Command | |
 |---|---|
@@ -183,27 +192,40 @@ src/
 │
 ├── store/
 │   ├── useStore.ts          # Trades, accounts, journal, goals,
-│   │                        #   watchlist, settings, filters
+│   │                        #   watchlist, settings — API-backed, optimistic
 │   ├── useMtfStore.ts       # MTF tracker — deliberately isolated
+│   ├── settingsSync.ts      # Single debounced writer for the shared settings row
 │   ├── useFilteredTrades.ts # Global date-range + account scoping
 │   └── toast.ts
 │
 ├── lib/
+│   ├── api.ts               # fetch wrapper — attaches the JWT, retries once on 401
+│   ├── supabase.ts          # Supabase client (auth + session)
+│   ├── images.ts            # WebP conversion + authenticated R2 screenshot access
+│   ├── backup.ts            # Lossless export / import
+│   ├── migrateLocal.ts      # One-time localStorage → cloud migration
 │   ├── metrics.ts           # All performance math. Pure. Takes Trade[].
 │   ├── tradeMath.ts         # Charges, tax category, R-multiple
 │   ├── incomeTax.ts         # FY engine — slabs, 87A, cess
 │   ├── sampleData.ts        # Seeded deterministic generator
-│   ├── format.ts            # ₹ / % / duration formatting
-│   ├── csv.ts               # Export helpers
-│   ├── rng.ts               # Seeded RNG
+│   ├── format.ts · csv.ts · rng.ts
 │   └── mtf/                 # MTF domain: types, calc, palette, export
 │
 ├── components/
 │   ├── ui/                  # Card, Button, Badge, Field, Modal, Table…
 │   ├── charts/              # chartTheme + shared ChartTooltip
+│   ├── RequireAuth.tsx      # Guards the app shell
 │   └── layout/              # AppLayout, Sidebar, Topbar, CommandPalette
 │
 └── pages/                   # One folder per page for its subcomponents
+
+worker/                      # Cloudflare Worker (Hono)
+├── src/index.ts             #   CORS, auth middleware, route registration, keep-alive cron
+├── src/crud.ts              #   shared entity CRUD (pass-through streaming)
+├── src/settings.ts          #   user_settings singleton
+└── src/screenshots.ts       #   R2 upload / download
+
+supabase/migrations/         # Postgres schema — 8 tables, RLS, grants (applied)
 ```
 
 `@/` → `src/`. Import `@/lib/metrics`, never `../../lib/metrics`.
@@ -212,22 +234,28 @@ src/
 
 ## 🧱 How it holds together
 
-### Storage is one swappable layer
+### The architecture
 
 ```mermaid
 flowchart TD
-    P["16 pages · 40+ charts"] -- "useStore(s => s.trades)" --> S["zustand store"]
+    P["16 pages · 40+ charts"] -- "useStore(s => s.trades)" --> S["zustand stores<br/>optimistic · in-memory"]
     P -- "addTrade / closeTrade / …" --> S
-    S <--> L[("localStorage")]
+    S -- "fetch + Bearer JWT" --> W["Cloudflare Worker · Hono<br/>pass-through proxy"]
+    W -- "forwards the caller's JWT" --> DB[("Supabase Postgres<br/>Row Level Security")]
+    W --> R2[("Cloudflare R2<br/>screenshots")]
+    A["Supabase Auth"] -. "access token" .-> P
 
     style S fill:#1c1f24,stroke:#7c5cff,color:#e6e8eb
-    style L fill:#1c1f24,stroke:#8b929d,color:#e6e8eb
+    style W fill:#1c1f24,stroke:#f38020,color:#e6e8eb
+    style DB fill:#14321f,stroke:#3ecf8e,color:#e6e8eb
+    style R2 fill:#1c1f24,stroke:#f38020,color:#e6e8eb
+    style A fill:#1c1f24,stroke:#8b929d,color:#e6e8eb
     style P fill:#141619,stroke:#262a31,color:#e6e8eb
 ```
 
-**Not one page or chart touches storage.** Everything reads through a selector and writes through a named action. Persistence is entirely the two store files' business.
+**Not one page or chart touches the network.** Everything still reads through a selector and writes through a named action — the pages never changed. The two store files hydrate from the API on load and mirror every mutation optimistically, so swapping `localStorage` for the cloud really was the two-file job the boundary promised.
 
-Which means swapping `localStorage` for a real database is a two-file job, not a rewrite. That's the whole point of the boundary — see [Roadmap](#-roadmap).
+The Worker is a thin authenticated proxy: it validates the Supabase token, then **forwards it** to Postgres so **Row Level Security** — not the Worker — decides which rows you see. It holds no `service_role` key. Screenshots stream to Cloudflare R2, namespaced by user id.
 
 ### Compute is pure
 
@@ -241,11 +269,11 @@ The topbar date-range and account pickers reach every page through `useFilteredT
 
 `datasetToday()` anchors "today" to the newest trade instead of the wall clock — so the sample data behaves whenever you open it.
 
-### Migrations are mandatory
+### Optimistic, then synced
 
-Both stores are versioned — main is at **v7**, MTF at **v2**. Each step backfills what changed: product segments, `taxablePnl`, the NSE/BSE flag, MTF pledge charges. Existing local data survives every upgrade.
+Each store hydrates from the API on sign-in and writes optimistically — the UI updates instantly, the API call fires in the background, and a failed write raises a toast. `settings` is one shared Postgres row written through a single debounced path, so the two stores can never clobber each other's columns.
 
-> **If you add a field to a persisted type: bump the version, write the backfill.** Skip it and you'll silently corrupt someone's history.
+The pre-cloud `localStorage` keys (`ledgerx-store` v7, `mtf-store` v2) are **still on disk, read-only** — the source for a one-time **Settings → Migrate to cloud** that uploads them to your account, verified field-by-field, and never touches them again.
 
 ### The design system
 
@@ -266,54 +294,53 @@ Chart colours are a separate, accessibility-validated system: 8 fixed categorica
 
 ## 🔒 Your data
 
-Two `localStorage` keys. That's the entire backend.
+Your journal lives in **your own Supabase account**, isolated by Postgres **Row Level Security** — every query is scoped to your user id, enforced by the database, not the app. Sign in with Supabase Auth and you see only your rows; the Worker forwards your token and holds no master key, so it can't reach anyone else's data either.
 
-| Key | Holds |
+| Where | Holds |
 |---|---|
-| `ledgerx-store` | Trades, accounts, cash transactions, journal, goals, targets, watchlist, settings |
-| `mtf-store` | MTF positions, brokers, account value |
+| **Postgres** (8 tables, RLS) | Trades, accounts, cash, journal, goals, targets, watchlist, settings, MTF positions & brokers |
+| **Cloudflare R2** | Trade screenshots — WebP, namespaced by user id |
+| **`localStorage`** | The pre-cloud copy — kept read-only as your offline backup |
 
-**Nothing leaves your browser.** No server, no analytics, no telemetry, no signup.
-
-The trade-off is real: one browser, one machine, and clearing site data takes everything with it.
+**No analytics, no telemetry, no third-party tracking.** Just your data, in your account.
 
 ### Back it up
 
-**Settings → Data management → Export JSON.**
-
-> ⚠️ **Known gaps, being honest:** that export skips `portfolioTargets` and the entire MTF store, and the import path restores **trades only**. For a genuine full snapshot, open devtools on the app and run:
->
-> ```js
-> copy(localStorage.getItem("ledgerx-store"))  // paste into a file
-> copy(localStorage.getItem("mtf-store"))      // again
-> ```
+**Settings → Data management → Export JSON** — a complete, lossless snapshot: every collection, your settings, and the full MTF store. **Import** restores all of it. (The old export gaps are closed — nothing is left behind anymore.)
 
 ---
 
 ## ☁️ Deploy
 
-Static SPA — anything that serves files works. Two configs included:
+Frontend on **Cloudflare Pages**, API on a **Cloudflare Worker**, data in **Supabase**, screenshots in **R2**.
 
-- **Netlify** — [`netlify.toml`](netlify.toml): build `npm run build`, publish `dist`, Node 20
-- **Vercel** — [`vercel.json`](vercel.json): equivalent rewrite
+```bash
+cd worker
+npx wrangler r2 bucket create ledgerx-screenshots   # once
+npx wrangler deploy                                  # Worker + R2 binding + daily cron
+```
 
-Both set the SPA fallback, and **it isn't optional.** Without it, every route except `/` 404s on hard refresh — `/trades` works when you click to it and dies when you reload. Classic.
+Then point the frontend at it: connect the repo to **Cloudflare Pages**, build `npm run build`, output `dist`, `NODE_VERSION=20`, and set the three `VITE_*` env vars — with `VITE_API_URL` pointing at the deployed Worker's `workers.dev` URL. Vite inlines env vars at build time, so **redeploy Pages after adding them.**
+
+A daily `[triggers]` cron on the Worker makes one unauthenticated read against Postgres so the free Supabase project never idles into its 7-day pause — see [`worker/README.md`](worker/README.md). The pre-cloud [`netlify.toml`](netlify.toml) / [`vercel.json`](vercel.json) static configs are kept for reference.
+
+The SPA fallback (`public/_redirects`) **isn't optional** — without it every route except `/` 404s on hard refresh. Classic.
 
 ---
 
-## 🧭 Roadmap
+## ✅ Shipped
 
-Getting off `localStorage` so the journal follows you between devices:
+Everything the roadmap promised — the journal now follows you between devices:
 
-- [ ] **Supabase** — Postgres + Auth + Row Level Security, Mumbai region
-- [ ] **Real auth** — `/login` and `/signup` are currently beautiful liars, pure UI
-- [ ] **One-click migration** — spot existing local data on first login and upload it, *after* letting the zustand migrate chain run so nothing arrives half-formed
-- [ ] **Screenshots → object storage**, WebP on upload, never inline data-URIs in a trade row
-- [ ] **Automated backups** — the gap that actually matters for tax records
-- [ ] Close the export gaps above
-- [ ] Broker API sync (Zerodha / Groww) — needs a real server to hold the keys
+- [x] **Supabase** — Postgres + Auth + Row Level Security, Mumbai region
+- [x] **Real auth** — email/password sign-in, a session-guarded app shell (`/login` and `/signup` do the real thing now)
+- [x] **Cloudflare Worker API** — Hono, a JWT-forwarding pass-through to PostgREST so RLS stays the boundary
+- [x] **One-click migration** — detect local data, verify the store version, upload it field-verified
+- [x] **Screenshots → R2**, WebP on upload, never inline data-URIs in a trade row
+- [x] **Lossless backup** — Export / Import now covers every collection
+- [x] **Cloudflare Pages** deploy + a daily keep-alive cron
 
-Thanks to the store boundary, none of this touches the pages.
+Still on the wishlist: Google sign-in, password reset, and broker API sync (Zerodha / Groww). Thanks to the store boundary, none of it touched the pages.
 
 ---
 
