@@ -76,15 +76,45 @@ Sixteen pages. Here's the tour.
 | **Reports** | Downloadable performance / trade-log / tax summaries, over a period independent of the global filters |
 | **Settings** | Profile, appearance, editable charge + tax rate cards, export / import / migrate |
 
-## Screenshots
+## 📸 What it looks like
 
-<!-- Drop images in docs/ and uncomment:
-| Dashboard | Charges |
+Dark by default — near-black `#0a0b0d` canvas, elevated `#141619` cards, electric-violet accents, and a strict green/red pair reserved for profit and loss so your eye never has to decode a colour.
+
+| Screen | What you're looking at |
 |---|---|
-| ![Dashboard](docs/dashboard.png) | ![Charges](docs/charges.png) |
+| **Dashboard** | Equity curve with a gradient fill, six animated KPI tiles, a month-over-month comparison, a win-rate donut, and a P&L calendar heatmap — green days, red days, intensity by size |
+| **Trades** | Dense tabular figures, direction and status badges, multi-select, and a slide-over drawer with the full charge breakdown for any row |
+| **Charges & Fees** | The uncomfortable one — every levy stacked by component, with charges as a percentage of gross P&L |
+| **Tax Report** | Financial-year computation laid out like a real return: slab-wise business income, §111A, §112A, cess, and the §87A rebate |
+| **MTF Tracker** | Per-position interest accrual, live break-even price, and health tiers that turn amber then red as interest eats into profit |
+| **Analytics** | R-multiple histogram, performance by strategy and tag, day-of-week and hour-of-day heatmaps |
+
+<!-- ─────────────────────────────────────────────────────────────
+     TO ADD SCREENSHOTS
+
+     ⚠️  Use SAMPLE DATA, not your real journal — this repo is public.
+         Settings → Data management → Reset sample data.
+
+     Capture at 1440px wide, save as WebP or PNG into docs/,
+     then delete this comment block and uncomment the gallery below.
+
+       docs/dashboard.png   docs/trades.png
+       docs/charges.png     docs/tax.png
+       docs/mtf.png         docs/analytics.png
+────────────────────────────────────────────────────────────── -->
+
+<!--
+| | |
+|:---:|:---:|
+| ![Dashboard](docs/dashboard.png) | ![Trades](docs/trades.png) |
+| **Dashboard** — equity curve, KPIs, P&L calendar | **Trades** — filterable log with the detail drawer |
+| ![Charges](docs/charges.png) | ![Tax Report](docs/tax.png) |
+| **Charges & Fees** — where the edge goes | **Tax Report** — full FY computation |
+| ![MTF](docs/mtf.png) | ![Analytics](docs/analytics.png) |
+| **MTF Tracker** — interest, break-even, health | **Analytics** — R-multiples and behaviour |
 -->
 
-_Coming soon._
+_Screenshots pending — see the comment above for the drop-in gallery._
 
 ---
 
@@ -210,7 +240,7 @@ return new Response(res.body);
 
 Cloudflare's free tier allows **10 ms of CPU per request**. Benchmarked on real data, `JSON.parse` + `stringify` costs **~2.7 µs per trade** — so parsing would blow the budget somewhere past 3,700 trades.
 
-Piping the raw stream costs the same whether you have 25 trades or 250,000. The limit stopped being a scaling concern and became a non-issue.
+Piping the raw stream costs the same whether you have a hundred trades or a quarter of a million. The limit stopped being a scaling concern and became a non-issue.
 
 ### The database is the security boundary, not the code
 
@@ -342,7 +372,7 @@ Store actions are **synchronous** — that's not an accident. Making them `async
 
 ### MTF interest is derived, never stored
 
-A margin position stores only *"bought 8 Jul, 25 shares at ₹1153.50"*. Open it in October and the browser subtracts the dates and computes the interest fresh.
+A margin position stores only its buy lots — date, quantity, price — and the daily rate. Open it three months later and the browser subtracts the dates and computes the interest fresh.
 
 No cron job. No stale values. No server maths. Closed positions freeze a snapshot; open ones recalculate on every render.
 
