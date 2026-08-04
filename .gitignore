@@ -39,3 +39,8 @@ pnpm-debug.log*
 # Deploy
 .netlify/
 .vercel/
+
+# Worker (Cloudflare) — node_modules is covered above; these are Worker-specific
+worker/node_modules/
+.dev.vars
+.wrangler/

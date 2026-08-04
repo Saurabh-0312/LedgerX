@@ -1,0 +1,10 @@
+# LedgerX API — Cloudflare Worker (Hono). Phase 3 scaffold.
+name = "ledgerx-api"
+main = "src/index.ts"
+compatibility_date = "2026-08-01"
+
+# CORS allow-list, comma-separated. An entry may use a `*` wildcard label
+# (one or more DNS labels). Edit here to add origins — no code change needed.
+# Add your production custom domain here later if you use one.
+[vars]
+CORS_ORIGINS = "http://localhost:5173,https://*.pages.dev"
