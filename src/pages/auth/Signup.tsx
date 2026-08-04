@@ -1,10 +1,11 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, Navigate, useNavigate } from "react-router-dom";
 import { UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Field, Input } from "@/components/ui/Field";
 import { toast } from "@/store/toast";
+import { useAuth } from "@/store/useAuth";
 import { AuthLayout } from "./AuthLayout";
 import { PasswordInput } from "./PasswordInput";
 
@@ -42,14 +43,35 @@ function passwordStrength(pw: string): Strength {
 
 export default function Signup() {
   const navigate = useNavigate();
+  const signUp = useAuth((s) => s.signUp);
+  const session = useAuth((s) => s.session);
+  const authLoading = useAuth((s) => s.loading);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   const strength = passwordStrength(password);
 
-  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
+  // D6: render nothing until the session check resolves (no form flash for an
+  // already-signed-in user), then redirect them past the signup screen.
+  if (authLoading) return null;
+  if (session) return <Navigate to="/" replace />;
+
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    setSubmitting(true);
+    const { error, needsConfirmation } = await signUp(email, password);
+    setSubmitting(false);
+    if (error) {
+      toast(error, "error");
+      return;
+    }
+    if (needsConfirmation) {
+      toast("Check your email to confirm your account, then sign in", "info");
+      navigate("/login");
+      return;
+    }
     toast("Account created — welcome!");
     navigate("/");
   };
@@ -127,8 +149,8 @@ export default function Signup() {
           )}
         </Field>
 
-        <Button type="submit" variant="primary" icon={UserPlus} className="w-full">
-          Create account
+        <Button type="submit" variant="primary" icon={UserPlus} className="w-full" disabled={submitting}>
+          {submitting ? "Creating account…" : "Create account"}
         </Button>
       </form>
 

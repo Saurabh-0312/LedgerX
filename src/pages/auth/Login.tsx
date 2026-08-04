@@ -1,10 +1,11 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, Navigate, useNavigate } from "react-router-dom";
 import { LogIn } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Field, Input } from "@/components/ui/Field";
 import { toast } from "@/store/toast";
+import { useAuth } from "@/store/useAuth";
 import { AuthLayout } from "./AuthLayout";
 import { PasswordInput } from "./PasswordInput";
 
@@ -33,18 +34,30 @@ function GoogleGlyph() {
 
 export default function Login() {
   const navigate = useNavigate();
+  const signIn = useAuth((s) => s.signIn);
+  const session = useAuth((s) => s.session);
+  const authLoading = useAuth((s) => s.loading);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
 
-  const signIn = () => {
+  // D6: render nothing until the session check resolves (no form flash for an
+  // already-signed-in user), then redirect them past the login screen.
+  if (authLoading) return null;
+  if (session) return <Navigate to="/" replace />;
+
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setSubmitting(true);
+    const { error } = await signIn(email, password);
+    setSubmitting(false);
+    if (error) {
+      toast(error, "error");
+      return;
+    }
     toast("Welcome back");
     navigate("/");
-  };
-
-  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    signIn();
   };
 
   return (
@@ -98,8 +111,8 @@ export default function Login() {
           </a>
         </div>
 
-        <Button type="submit" variant="primary" icon={LogIn} className="w-full">
-          Sign in
+        <Button type="submit" variant="primary" icon={LogIn} className="w-full" disabled={submitting}>
+          {submitting ? "Signing in…" : "Sign in"}
         </Button>
       </form>
 
@@ -109,7 +122,12 @@ export default function Login() {
         <div className="h-px flex-1 bg-edge-soft" />
       </div>
 
-      <Button type="button" variant="outline" className="w-full" onClick={signIn}>
+      <Button
+        type="button"
+        variant="outline"
+        className="w-full"
+        onClick={() => toast("Google sign-in coming soon", "info")}
+      >
         <GoogleGlyph />
         Continue with Google
       </Button>

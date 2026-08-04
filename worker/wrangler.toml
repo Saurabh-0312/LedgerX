@@ -8,3 +8,8 @@ compatibility_date = "2026-08-01"
 # Add your production custom domain here later if you use one.
 [vars]
 CORS_ORIGINS = "http://localhost:5173,https://ledgerx.pages.dev,https://*.ledgerx.pages.dev"
+
+# Supabase — both are PUBLIC values (project URL + anon/publishable key). RLS is
+# the real boundary; the service_role key must NEVER go here.
+SUPABASE_URL = "https://wdkwwbszbydciywexmnn.supabase.co"
+SUPABASE_ANON_KEY = "sb_publishable_RfLi72zmr1A8vBNZG3xrFg_K8PKzDGW"

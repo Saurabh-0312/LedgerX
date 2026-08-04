@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ChevronDown, LogOut, Plus, Search, Settings, User, Wallet } from "lucide-react";
 import { useStore } from "@/store/useStore";
+import { useAuth } from "@/store/useAuth";
 import { Button } from "@/components/ui/Button";
 import { DateRangePicker } from "./DateRangePicker";
 
@@ -12,6 +13,7 @@ export function Topbar({ onOpenPalette }: { onOpenPalette: () => void }) {
   const filters = useStore((s) => s.filters);
   const setFilters = useStore((s) => s.setFilters);
   const userName = useStore((s) => s.settings.userName);
+  const signOut = useAuth((s) => s.signOut);
   const [profileOpen, setProfileOpen] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
 
@@ -88,7 +90,7 @@ export function Topbar({ onOpenPalette }: { onOpenPalette: () => void }) {
               </div>
               <MenuLink icon={User} label="Profile" onClick={() => { setProfileOpen(false); navigate("/settings"); }} />
               <MenuLink icon={Settings} label="Settings" onClick={() => { setProfileOpen(false); navigate("/settings"); }} />
-              <MenuLink icon={LogOut} label="Log out" onClick={() => { setProfileOpen(false); navigate("/login"); }} />
+              <MenuLink icon={LogOut} label="Log out" onClick={async () => { setProfileOpen(false); await signOut(); navigate("/login"); }} />
             </div>
           )}
         </div>

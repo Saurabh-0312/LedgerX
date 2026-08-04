@@ -203,7 +203,7 @@ export function AuthLayout({ children }: AuthLayoutProps) {
 
           <Card className="animate-in">{children}</Card>
 
-          <p className="mt-4 text-center text-[11px] text-faint">Demo build — any credentials work.</p>
+          <p className="mt-4 text-center text-[11px] text-faint">Your data is private to your account.</p>
         </div>
       </main>
     </div>

@@ -1,6 +1,7 @@
 import { lazy } from "react";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { AppLayout } from "@/components/layout/AppLayout";
+import { RequireAuth } from "@/components/RequireAuth";
 
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
 const Trades = lazy(() => import("@/pages/Trades"));
@@ -28,7 +29,7 @@ export default function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
 
-        <Route element={<AppLayout />}>
+        <Route element={<RequireAuth><AppLayout /></RequireAuth>}>
           <Route path="/" element={<Dashboard />} />
           <Route path="/trades" element={<Trades />} />
           <Route path="/trades/new" element={<TradeForm />} />
