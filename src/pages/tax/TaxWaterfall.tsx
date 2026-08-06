@@ -59,7 +59,8 @@ export function TaxWaterfall({
 
   const hasBusiness = r.businessPnl !== 0;
   // show a head whenever it has net P&L OR a positive taxable base — capital
-  // gains can be taxed (STT/DP added back) even when net nets to zero
+  // gains can be taxed (STT, DP, MTF interest and pledge charges are added
+  // back) even when net nets to zero
   const hasStcg = r.stcgPnl !== 0 || r.stcgGains > 0;
   const hasLtcg = r.ltcgPnl !== 0 || r.ltcgGains > 0;
   const hasCrypto = r.cryptoPnl !== 0 || r.cryptoGains !== 0;
@@ -108,7 +109,12 @@ export function TaxWaterfall({
           <SectionHead title="Short-term capital gains · §111A" note={`${ratePctLabel(rates.stcgPct)} flat`} />
           <Line label="Net STCG (equity, held < 12m)" value={m(r.stcgPnl, true)} valueClass={pnlClass(r.stcgPnl)} />
           {stcgAddBack > 0.005 && (
-            <Line label="Add back non-deductible (STT/DP)" value={`+ ${m(stcgAddBack)}`} indent valueClass="text-warning" />
+            <Line
+              label="Add back non-deductible (STT · DP · MTF interest · pledge)"
+              value={`+ ${m(stcgAddBack)}`}
+              indent
+              valueClass="text-warning"
+            />
           )}
           {r.basicExemptionUsedStcg > 0 && (
             <Line label="Less unused ₹4L basic exemption" value={`− ${m(r.basicExemptionUsedStcg)}`} indent valueClass="text-profit" />
@@ -124,7 +130,12 @@ export function TaxWaterfall({
           <SectionHead title="Long-term capital gains · §112A" note={`${ratePctLabel(rates.ltcgPct)} over ₹1.25L`} />
           <Line label="Net LTCG (equity, held ≥ 12m)" value={m(r.ltcgPnl, true)} valueClass={pnlClass(r.ltcgPnl)} />
           {ltcgAddBack > 0.005 && (
-            <Line label="Add back non-deductible (STT/DP)" value={`+ ${m(ltcgAddBack)}`} indent valueClass="text-warning" />
+            <Line
+              label="Add back non-deductible (STT · DP · MTF interest · pledge)"
+              value={`+ ${m(ltcgAddBack)}`}
+              indent
+              valueClass="text-warning"
+            />
           )}
           {ltcgAnnualUsed > 0 && (
             <Line label={`Less annual exemption (${m(annualExemption)})`} value={`− ${m(ltcgAnnualUsed)}`} indent valueClass="text-profit" />
