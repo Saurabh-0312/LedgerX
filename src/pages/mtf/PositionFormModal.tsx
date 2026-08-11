@@ -18,7 +18,9 @@ import type {
 } from "@/lib/mtf/types";
 import { annualizedPct, buildCloseSnapshot, chargesTotal, computePosition, normalizeLots } from "@/lib/mtf/calc";
 import { MTF_COLORS } from "@/lib/mtf/palette";
+import { computeCharges } from "@/lib/tradeMath";
 import { nextMtfId, useAsOfToday, useMtfStore } from "@/store/useMtfStore";
+import { useStore } from "@/store/useStore";
 import { toast } from "@/store/toast";
 import { formatMoney, formatNumber, formatPct, pnlClass } from "@/lib/format";
 import { Modal } from "@/components/ui/Modal";
@@ -34,7 +36,7 @@ const num = (s: string): number => {
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const todayISO = () => format(new Date(), "yyyy-MM-dd");
 
-type ChargesMethod = "itemized" | "total";
+type ChargesMethod = "itemized" | "total" | "auto";
 
 /** One editable buy-tranche row (string-backed like the rest of the draft). */
 interface LotDraft {
@@ -127,7 +129,7 @@ function makeDraft(initial: MtfPosition | null, fallbackBrokerId: string, fallba
     interestBasis: "total",
     fundedPercent: "100",
     manualInterestAdj: "",
-    chargesMethod: "itemized",
+    chargesMethod: "auto",
     brokerage: "",
     stt: "",
     exchangeTxn: "",
@@ -264,6 +266,7 @@ export function PositionFormModal({
   const addPosition = useMtfStore((s) => s.addPosition);
   const updatePosition = useMtfStore((s) => s.updatePosition);
   const asOf = useAsOfToday();
+  const chargeRates = useStore((s) => s.settings.chargeRates);
 
   const [draft, setDraft] = useState<Draft>(() =>
     makeDraft(initial, brokers[0]?.id ?? "", brokers[0]?.dailyRatePct ?? 0.041),
@@ -322,7 +325,47 @@ export function PositionFormModal({
   const totalInvestment = r2(validLots.reduce((s, l) => s + l.quantity * l.price, 0));
   const avgPrice = totalQty > 0 ? totalInvestment / totalQty : 0;
 
-  const draftCharges = useMemo(() => buildCharges(draft), [draft]);
+  // Auto-calculate — full round-trip Groww charges (both buy & sell legs) from the
+  // rate card, exactly like the Add Trade form. MTF interest is tracked separately in
+  // this form, so it is NOT folded in here (mtfInterest: 0). The sell leg is valued at
+  // the CMP, falling back to the avg buy price when no CMP is given (round-trip at cost).
+  const autoBreakdown = useMemo(() => {
+    if (totalQty <= 0 || avgPrice <= 0) return null;
+    const cp = num(draft.currentPrice);
+    return computeCharges({
+      assetClass: "Equity",
+      segment: "MTF",
+      exchange: "NSE",
+      quantity: totalQty,
+      entryPrice: avgPrice,
+      exitPrice: cp > 0 ? cp : avgPrice,
+      direction: "Long",
+      rates: chargeRates,
+      mtfInterest: 0,
+    });
+  }, [totalQty, avgPrice, draft.currentPrice, chargeRates]);
+
+  /** Auto charges mapped to the MtfCharges shape (pledge → "other" — MtfCharges has no
+   *  pledge field; the pledge's GST is already inside `gst`). */
+  const autoCharges = useMemo<MtfCharges>(() => {
+    const b = autoBreakdown;
+    if (!b) return {};
+    const c: MtfCharges = {};
+    if (b.brokerage) c.brokerage = b.brokerage;
+    if (b.stt) c.stt = b.stt;
+    if (b.exchangeTxn) c.exchangeTxn = b.exchangeTxn;
+    if (b.gst) c.gst = b.gst;
+    if (b.sebi) c.sebi = b.sebi;
+    if (b.stampDuty) c.stampDuty = b.stampDuty;
+    if (b.dpCharges) c.dp = b.dpCharges;
+    if (b.pledgeCharges) c.other = b.pledgeCharges;
+    return c;
+  }, [autoBreakdown]);
+
+  const draftCharges = useMemo(
+    () => (draft.chargesMethod === "auto" ? autoCharges : buildCharges(draft)),
+    [draft, autoCharges],
+  );
   const itemizedSum = chargesTotal(draftCharges);
 
   /** Live summary — a full draft MtfPosition run through the frozen calc core. */
@@ -389,7 +432,7 @@ export function PositionFormModal({
       interestBasis: draft.interestBasis,
       fundedPercent: fp >= 1 && fp <= 100 ? fp : 100,
       manualInterestAdj: adj !== 0 ? adj : undefined,
-      charges: buildCharges(draft),
+      charges: draftCharges,
     };
     // Editing a position that STAYS closed: recompute the frozen snapshot from the
     // edited lots/rate/charges + the original exit price & date, so the snapshot can
@@ -675,13 +718,14 @@ export function PositionFormModal({
           <h3 className="label-caps">Charges</h3>
           <Segmented<ChargesMethod>
             options={[
+              { value: "auto", label: "Auto-calculate" },
               { value: "itemized", label: "Itemized" },
               { value: "total", label: "Total" },
             ]}
             value={draft.chargesMethod}
             onChange={(v) => patch({ chargesMethod: v })}
             ariaLabel="Charges method"
-            className="sm:max-w-xs"
+            className="sm:max-w-md"
           />
           {draft.chargesMethod === "itemized" ? (
             <>
@@ -709,7 +753,7 @@ export function PositionFormModal({
                 </span>
               </p>
             </>
-          ) : (
+          ) : draft.chargesMethod === "total" ? (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <Field label="Total Charges (₹)" hint="all-in round-trip estimate">
                 {(id) => (
@@ -725,6 +769,42 @@ export function PositionFormModal({
                 )}
               </Field>
             </div>
+          ) : autoBreakdown ? (
+            <div className="space-y-2.5">
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 rounded-[10px] border border-edge-soft bg-raised/60 p-3 text-[12px] sm:grid-cols-4">
+                {(
+                  [
+                    ["Brokerage", autoBreakdown.brokerage],
+                    ["Exchange", autoBreakdown.exchangeTxn],
+                    ["STT", autoBreakdown.stt],
+                    ["SEBI", autoBreakdown.sebi],
+                    ["Stamp duty", autoBreakdown.stampDuty],
+                    ["GST", autoBreakdown.gst],
+                    ["DP charges", autoBreakdown.dpCharges],
+                    ["MTF pledge", autoBreakdown.pledgeCharges],
+                  ] as [string, number][]
+                ).map(([label, val]) => (
+                  <div key={label} className="flex items-baseline justify-between gap-2">
+                    <span className="text-muted">{label}</span>
+                    <span className="tnum text-ink">{formatMoney(val, { decimals: true })}</span>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[12px] text-muted">
+                Total charges{" "}
+                <span className="tnum font-semibold text-ink">
+                  {formatMoney(autoBreakdown.total, { decimals: true })}
+                </span>
+              </p>
+              <p className="text-[11px] leading-relaxed text-faint">
+                Auto-computed from your Groww rate card (Settings) for a full round-trip — both the buy
+                and sell legs. MTF interest is tracked separately above, so it isn&apos;t included here.
+              </p>
+            </div>
+          ) : (
+            <p className="text-[12px] text-faint">
+              Add a purchase (quantity &amp; buy price) above to auto-compute charges.
+            </p>
           )}
         </section>
 
