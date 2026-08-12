@@ -6,7 +6,7 @@ export type TradeStatus = "Open" | "Closed" | "Cancelled";
 /** Broker product/segment — drives which charge formula applies and the tax base.
  *  Equity splits into Delivery (CNC) / Intraday (MIS) / MTF (e-Margin);
  *  Options & Futures are FnO; everything else is Other. */
-export type TradeSegment = "Delivery" | "Intraday" | "MTF" | "FnO" | "Other";
+export type TradeSegment = "Delivery" | "Intraday" | "MTF" | "ETF" | "FnO" | "Other";
 /** Exchange the order routed to — only the exchange transaction charge differs
  *  (NSE 0.00297% vs BSE 0.00375% on equity); every other levy is identical. */
 export type Exchange = "NSE" | "BSE";
@@ -150,6 +150,7 @@ export interface ChargeRates {
   mtfInterestAnnualPct: number; // MTF/margin interest % per annum (informational — interest is entered manually)
   sttIntradayPct: number; // sell side
   sttDeliveryPct: number; // both sides
+  sttEtfDeliveryPct: number; // equity ETF — sell side only (nil on buy)
   sttOptionsPct: number; // sell premium
   sttFuturesPct: number; // sell side
   exchangeEquityPct: number; // NSE cash equity (0.00297%)

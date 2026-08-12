@@ -20,6 +20,7 @@ export const DEFAULT_CHARGE_RATES: ChargeRates = {
   mtfInterestAnnualPct: 14.95, // Groww MTF interest 14.95% p.a. (0.041%/day) on the funded amount
   sttIntradayPct: 0.025,
   sttDeliveryPct: 0.1,
+  sttEtfDeliveryPct: 0.001, // equity/index ETF — 0.001% on sell only (₹1/lakh); nil on buy
   sttOptionsPct: 0.1,
   sttFuturesPct: 0.02,
   exchangeEquityPct: 0.00297, // NSE cash equity — ₹2.97/lakh
@@ -120,16 +121,22 @@ export function computeCharges(input: ChargesInput): ChargesBreakdown {
 
   switch (assetClass) {
     case "Equity": {
-      // MTF is a delivery product — same statutory treatment as delivery
-      const equityIntraday = segment === "Intraday";
+      // MTF is a delivery product — same statutory treatment as delivery.
+      // ETF (equity/index) is delivery treatment too, EXCEPT STT: nil on the buy,
+      // 0.001% on the sell only (vs 0.1% on both legs for ordinary shares).
       // only the exchange transaction charge differs NSE vs BSE
       const equityExchangePct =
         input.exchange === "BSE" ? rates.exchangeEquityBsePct : rates.exchangeEquityPct;
       exchangeTxn = pct(turnover, equityExchangePct);
-      if (equityIntraday) {
+      if (segment === "Intraday") {
         stt = pct(sellValue, rates.sttIntradayPct);
         stampDuty = pct(buyValue, rates.stampIntradayPct);
+      } else if (segment === "ETF") {
+        stt = pct(sellValue, rates.sttEtfDeliveryPct); // sell side only — nothing on buy
+        stampDuty = pct(buyValue, rates.stampDeliveryPct);
+        if (legs === 2) dpCharges = rates.dpChargePerSell;
       } else {
+        // Delivery / MTF
         stt = pct(buyValue, rates.sttDeliveryPct) + pct(sellValue, rates.sttDeliveryPct);
         stampDuty = pct(buyValue, rates.stampDeliveryPct);
         if (legs === 2) dpCharges = rates.dpChargePerSell;

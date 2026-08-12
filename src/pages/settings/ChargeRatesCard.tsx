@@ -55,6 +55,7 @@ const GROUPS: { heading: string; fields: RateField[] }[] = [
     fields: [
       { key: "sttIntradayPct", label: "Equity intraday", suffix: "%", hint: "On the sell side" },
       { key: "sttDeliveryPct", label: "Equity delivery", suffix: "%", hint: "On both sides of the trade" },
+      { key: "sttEtfDeliveryPct", label: "Equity ETF (delivery)", suffix: "%", hint: "Sell side only — nil on buy (₹1/lakh)" },
       { key: "sttOptionsPct", label: "Options", suffix: "%", hint: "On sell-side premium" },
       { key: "sttFuturesPct", label: "Futures", suffix: "%", hint: "On the sell side" },
     ],

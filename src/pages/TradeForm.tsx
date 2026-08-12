@@ -129,7 +129,7 @@ export default function TradeForm() {
     // segment drives everything: equity uses the picker, derivatives are FnO, etc.
     const segment: TradeSegment =
       draft.assetClass === "Equity"
-        ? draft.segment === "Intraday" || draft.segment === "MTF"
+        ? draft.segment === "Intraday" || draft.segment === "MTF" || draft.segment === "ETF"
           ? draft.segment
           : "Delivery"
         : defaultSegmentFor(draft.assetClass);
@@ -403,7 +403,7 @@ export default function TradeForm() {
                           assetClass,
                           segment:
                             assetClass === "Equity"
-                              ? draft.segment === "Intraday" || draft.segment === "MTF"
+                              ? draft.segment === "Intraday" || draft.segment === "MTF" || draft.segment === "ETF"
                                 ? draft.segment
                                 : "Delivery"
                               : defaultSegmentFor(assetClass),
@@ -420,16 +420,17 @@ export default function TradeForm() {
                 </Field>
                 {draft.assetClass === "Equity" && (
                   <div className="grid gap-4 sm:grid-cols-[1fr_140px]">
-                    <Field label="Segment" hint="Groww product — drives charges & the tax base (MTF = delivery charges + interest)">
+                    <Field label="Segment" hint="Groww product — drives charges & the tax base (MTF adds interest · ETF = no buy STT, 0.001% sell)">
                       {() => (
                         <Segmented
                           ariaLabel="Equity segment"
-                          value={draft.segment === "Intraday" || draft.segment === "MTF" ? draft.segment : "Delivery"}
+                          value={draft.segment === "Intraday" || draft.segment === "MTF" || draft.segment === "ETF" ? draft.segment : "Delivery"}
                           onChange={(segment) => patch({ segment: segment as TradeSegment })}
                           options={[
                             { value: "Delivery", label: "Delivery" },
                             { value: "Intraday", label: "Intraday", activeClass: "bg-info-soft text-info" },
                             { value: "MTF", label: "MTF", activeClass: "bg-warning-soft text-warning" },
+                            { value: "ETF", label: "ETF", activeClass: "bg-accent-soft text-accent" },
                           ]}
                         />
                       )}
