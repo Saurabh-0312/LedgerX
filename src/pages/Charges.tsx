@@ -450,7 +450,7 @@ export default function Charges() {
               </Link>{" "}
               — brokerage ₹20 or 0.1% whichever lower (flat 0.1% for MTF), STT/CTT by segment,
               exchange transaction fees (NSE/BSE), SEBI turnover fees, stamp duty on the buy side,
-              DP charges on delivery/MTF sells, MTF pledge + interest, and 18% GST on brokerage +
+              DP charges on delivery/MTF/ETF sells, pledge + MTF interest, and 18% GST on brokerage +
               exchange txn + SEBI + DP + pledge. Adjust the rates to match your broker and future
               trades recompute automatically.
             </p>

@@ -167,8 +167,10 @@ export function computeCharges(input: ChargesInput): ChargesBreakdown {
       break;
   }
 
-  // MTF pledge (buy leg) + unpledge (sell leg) — ₹20/request per executed leg
-  const pledgeCharges = segment === "MTF" ? rates.pledgeChargePerRequest * legs : 0;
+  // Pledge (buy leg) + unpledge (sell leg) — ₹20/request per executed leg. Applies to
+  // MTF, and to ETF (pledged as collateral for margin — same ₹20/leg pledge/unpledge fee).
+  const pledgeCharges =
+    segment === "MTF" || segment === "ETF" ? rates.pledgeChargePerRequest * legs : 0;
   // SEBI turnover fee applies to exchange-regulated segments only, not crypto/VDA
   const sebi = assetClass === "Crypto" ? 0 : pct(turnover, rates.sebiPct);
   // GST 18% on brokerage + exchange txn + SEBI + DP + pledge (Groww's GST base)

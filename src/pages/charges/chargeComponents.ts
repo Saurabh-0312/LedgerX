@@ -24,7 +24,7 @@ export const CHARGE_COMPONENTS: readonly ChargeComponentDef[] = [
   { key: "stampDuty", label: "Stamp duty", short: "Stamp", color: CAT[4] },
   { key: "gst", label: "GST", short: "GST", color: CAT[5] },
   { key: "dpCharges", label: "DP charges", short: "DP", color: CAT[6] },
-  { key: "pledgeCharges", label: "MTF pledge", short: "Pledge", color: INFO },
+  { key: "pledgeCharges", label: "Pledge", short: "Pledge", color: INFO },
   { key: "manual", label: "Manual charges", short: "Manual", color: CAT[7] },
   { key: "mtfInterest", label: "MTF interest", short: "MTF int", color: WARNING },
 ];

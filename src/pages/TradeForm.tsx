@@ -198,7 +198,7 @@ export default function TradeForm() {
     { label: "Stamp duty", value: calc.charges.stampDuty },
     { label: "GST", value: calc.charges.gst },
     { label: "DP charges", value: calc.charges.dpCharges },
-    { label: "MTF pledge", value: calc.charges.pledgeCharges ?? 0 },
+    { label: "Pledge", value: calc.charges.pledgeCharges ?? 0 },
     ...(isMtfSeg ? [{ label: "MTF interest", value: calc.charges.mtfInterest, warn: true }] : []),
   ].filter((r) => r.value > 0 || r.warn);
 
@@ -817,7 +817,7 @@ export default function TradeForm() {
                   <div className="flex items-start gap-2 rounded-[10px] bg-info-soft p-3 text-[12px] leading-relaxed text-info">
                     <Info size={14} className="mt-0.5 shrink-0" aria-hidden />
                     <span>
-                      Auto-computed from your Groww rate card in Settings. STT/CTT, DP charges, MTF pledge
+                      Auto-computed from your Groww rate card in Settings. STT/CTT, DP charges, pledge
                       and interest aren’t tax-deductible for capital-gains trades — the tax box reflects that.
                     </span>
                   </div>

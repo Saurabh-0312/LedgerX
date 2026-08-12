@@ -285,7 +285,7 @@ export default function Reports() {
       "Trade ID", "Account", "Symbol", "Asset class", "Segment", "Exchange", "Direction", "Status",
       "Quantity", "Entry price", "Exit price", "Stop loss", "Target",
       "Opened at", "Closed at", "Holding (min)",
-      "Gross P&L", "Brokerage", "Exchange txn", "STT/CTT", "SEBI", "Stamp duty", "GST", "DP charges", "MTF pledge", "Manual charges", "MTF interest", "Total charges",
+      "Gross P&L", "Brokerage", "Exchange txn", "STT/CTT", "SEBI", "Stamp duty", "GST", "DP charges", "Pledge", "Manual charges", "MTF interest", "Total charges",
       "Net P&L", "Taxable P&L", "Tax category", "Taxable amount", "Tax rate %", "Est. tax",
       "Risk amount", "R multiple", "Position value", "% of capital",
       "Strategy", "Market condition", "Timeframe", "Tags",

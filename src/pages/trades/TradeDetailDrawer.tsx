@@ -107,7 +107,7 @@ export function TradeDetailDrawer({ trade, onClose }: TradeDetailDrawerProps) {
     ["Stamp duty", c.stampDuty],
     ["GST", c.gst],
     ["DP charges", c.dpCharges],
-    ...((c.pledgeCharges ?? 0) > 0 ? ([["MTF pledge", c.pledgeCharges]] as [string, number][]) : []),
+    ...((c.pledgeCharges ?? 0) > 0 ? ([["Pledge", c.pledgeCharges]] as [string, number][]) : []),
     ...((c.mtfInterest ?? 0) > 0 ? ([["MTF interest", c.mtfInterest]] as [string, number][]) : []),
   ];
 
@@ -365,7 +365,7 @@ export function TradeDetailDrawer({ trade, onClose }: TradeDetailDrawerProps) {
         {closed && Math.round((trade.taxablePnl - trade.netPnl) * 100) / 100 > 0.005 && (
           <p className="mt-2 text-[11px] leading-relaxed text-faint">
             Taxable base is {formatMoney(trade.taxablePnl, { sign: true, decimals: true })} — higher than net
-            because {trade.tax.category === "Crypto" ? "no costs are" : "STT/CTT, DP, MTF pledge & interest are not"}{" "}
+            because {trade.tax.category === "Crypto" ? "no costs are" : "STT/CTT, DP, pledge & interest are not"}{" "}
             deductible for {trade.tax.category}.{" "}
             {formatMoney(Math.round((trade.taxablePnl - trade.netPnl) * 100) / 100, { decimals: true })} added back.
           </p>

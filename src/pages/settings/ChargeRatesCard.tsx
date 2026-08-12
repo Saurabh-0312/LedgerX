@@ -92,7 +92,7 @@ const GROUPS: { heading: string; fields: RateField[] }[] = [
       { key: "sebiPct", label: "SEBI charges", suffix: "%", hint: "% of total turnover" },
       { key: "gstPct", label: "GST", suffix: "%", hint: "On brokerage + exchange txn + SEBI + DP + pledge" },
       { key: "dpChargePerSell", label: "DP charge", suffix: "₹/sell", hint: "Per delivery/MTF equity sell" },
-      { key: "pledgeChargePerRequest", label: "MTF pledge/unpledge", suffix: "₹/leg", hint: "₹20 + GST per ISIN per request (MTF buy & sell)" },
+      { key: "pledgeChargePerRequest", label: "Pledge / unpledge", suffix: "₹/leg", hint: "₹20 + GST per ISIN per request — MTF & pledged ETF (buy & sell)" },
     ],
   },
 ];

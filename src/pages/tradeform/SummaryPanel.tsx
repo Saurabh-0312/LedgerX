@@ -97,7 +97,7 @@ export function SummaryPanel({
     { label: "Stamp duty", value: c.charges.stampDuty },
     { label: "GST", value: c.charges.gst },
     { label: "DP charges", value: c.charges.dpCharges },
-    { label: "MTF pledge", value: c.charges.pledgeCharges ?? 0 },
+    { label: "Pledge", value: c.charges.pledgeCharges ?? 0 },
     { label: "MTF interest", value: c.charges.mtfInterest ?? 0 },
   ].filter((i) => i.value !== 0);
 
@@ -214,7 +214,7 @@ export function SummaryPanel({
               <p className="pt-0.5 text-[11px] leading-relaxed text-faint">
                 {c.tax.category === "Crypto"
                   ? "No costs are deductible for crypto — "
-                  : "STT/CTT, DP, MTF pledge & interest aren’t deductible — "}
+                  : "STT/CTT, DP, pledge & interest aren’t deductible — "}
                 {money(addBack, { decimals: true })} added back, taxed on gross of these ({c.tax.category}).
               </p>
             )}

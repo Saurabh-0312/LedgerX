@@ -24,7 +24,7 @@ export interface ChargesBreakdown {
   stampDuty: number;
   gst: number;
   dpCharges: number;
-  /** MTF pledge + unpledge charges (₹20/request per leg; MTF segment only, else 0) */
+  /** Pledge + unpledge charges (₹20/request per leg; MTF & pledged ETF, else 0) */
   pledgeCharges: number;
   /** manually-entered brokerage + statutory charges (manual mode only; 0 for auto) */
   manual: number;
